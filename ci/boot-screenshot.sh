@@ -66,29 +66,54 @@ fi
 sudo chown -R "$(id -u):$(id -g)" build
 echo "::endgroup::"
 
-DISK="$(find build -name '*.qcow2' | head -1)"
-[[ -n "$DISK" ]] || { echo "no qcow2 produced"; exit 1; }
+# Guarded for the same reason as find_firmware: a missing build/ would make this
+# pipeline non-zero and kill the script before its own error message runs.
+DISK="$(find build -name '*.qcow2' -print -quit 2>/dev/null || true)"
+if [[ -z "$DISK" ]]; then
+    echo "no qcow2 produced by 'just vm-image ${ARCH}'"
+    ls -R build 2>/dev/null | head -20
+    exit 1
+fi
 
 # TCG boots a full Plasma desktop far slower than KVM; give it room rather than
 # reporting a failure that is really a timeout.
 if [[ "$KVM" == yes ]]; then SETTLE=90; ACCEL=kvm; else SETTLE=420; ACCEL=tcg; fi
 
+# Search only directories that exist: `find` on a missing root returns non-zero,
+# which under `set -o pipefail` + `set -e` kills the script silently.
+find_firmware() {
+    local pattern="$1"; shift
+    local dir
+    for dir in "$@"; do
+        [[ -d "$dir" ]] || continue
+        local hit
+        hit="$(find "$dir" -name "$pattern" -print -quit 2>/dev/null || true)"
+        [[ -n "$hit" ]] && { echo "$hit"; return 0; }
+    done
+    return 0
+}
+
 echo "::group::boot ${DISK} (accel=${ACCEL}, settle=${SETTLE}s)"
 case "$ARCH" in
     x86_64)
         BIN=qemu-system-x86_64
-        FW=$(find /usr/share/OVMF /usr/share/edk2/ovmf -name 'OVMF_CODE*.fd' 2>/dev/null | head -1)
+        FW=$(find_firmware 'OVMF_CODE*.fd' /usr/share/OVMF /usr/share/edk2/ovmf)
         MACHINE=(-M q35 -device virtio-vga)
         ;;
     aarch64)
         BIN=qemu-system-aarch64
-        FW=$(find /usr/share/AAVMF /usr/share/edk2/aarch64 \
-                  -name 'AAVMF_CODE*.fd' -o -name 'QEMU_EFI*.fd' 2>/dev/null | head -1)
+        FW=$(find_firmware 'AAVMF_CODE*.fd' /usr/share/AAVMF /usr/share/edk2/aarch64)
+        [[ -n "$FW" ]] || FW=$(find_firmware 'QEMU_EFI*.fd' /usr/share/AAVMF /usr/share/edk2/aarch64)
         MACHINE=(-M virt -cpu max -device virtio-gpu-pci)
         ;;
     *) echo "unknown arch $ARCH"; exit 1 ;;
 esac
-[[ -n "$FW" ]] || { echo "no UEFI firmware found on the runner"; exit 1; }
+if [[ -z "$FW" ]]; then
+    echo "no UEFI firmware found on the runner. Searched:"
+    ls -d /usr/share/OVMF /usr/share/edk2/* /usr/share/AAVMF 2>/dev/null || true
+    exit 1
+fi
+echo "  firmware: ${FW}"
 
 rm -f "${OUT}/qmp.sock"
 "$BIN" -accel "$ACCEL" -m 4096 -smp 4 -bios "$FW" "${MACHINE[@]}" \
