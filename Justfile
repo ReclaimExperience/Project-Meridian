@@ -24,7 +24,7 @@ _todo wp target:
 # ------------------------------------------------------------------- lint ---
 
 # Full lint suite (PRD 6.3). Green from day one — this is WP-00's acceptance.
-lint: lint-shell lint-python lint-schemas lint-branding lint-strings lint-markdown
+lint: lint-shell lint-justfile lint-python lint-schemas lint-branding lint-strings lint-codeowners lint-markdown
     @echo
     @echo "lint: all checks passed"
 
@@ -41,6 +41,11 @@ lint-shell:
     if [ ${#files[@]} -eq 0 ]; then echo "  lint-shell: no shell scripts tracked yet"; exit 0; fi
     shellcheck "${files[@]}"
     echo "  lint-shell: ${#files[@]} script(s) clean"
+
+# shellcheck the bash embedded in Justfile recipes — the largest unlinted
+# shell surface in the repo, and where every shell defect so far has lived.
+lint-justfile:
+    @python3 tests/lint/justfile_shell.py
 
 # ruff over every tracked Python file
 lint-python:
@@ -64,6 +69,10 @@ lint-branding:
 # INV-0 + voice rules over user-visible strings (PRD 0.3, 4.5)
 lint-strings:
     @./tests/lint/strings.sh
+
+# every CODEOWNERS rule must be able to match something (rule R-H)
+lint-codeowners:
+    @./tests/lint/codeowners.sh
 
 lint-markdown:
     #!/usr/bin/env bash
@@ -195,11 +204,45 @@ vm-image arch="x86_64":
 vm-run arch="x86_64" mode="gui":
     #!/usr/bin/env bash
     set -euo pipefail
-    disk="$(find build -name '*.qcow2' | head -1)"
+    # `find build` exits non-zero when build/ does not exist, and under
+    # `set -euo pipefail` that killed the recipe before reaching the helpful
+    # message below — so the error branch was unreachable in exactly the case
+    # it was written for.
+    disk=""
+    if [ -d build ]; then
+        disk="$(find build -name '*.qcow2' 2>/dev/null | head -1 || true)"
+    fi
     if [ -z "$disk" ]; then
         echo "just vm-run: no qcow2 in build/ — run 'just vm-image {{ arch }}' first."
         exit 1
     fi
+
+    # Locate UEFI firmware across distros. The previous version used
+    # `brew --prefix qemu 2>/dev/null`, whose failure under `set -e` aborted the
+    # recipe with NO output at all on any machine without Homebrew — and its
+    # fallback path was Debian-only. That made the dev loop depend on one
+    # machine's setup rather than on repo files.
+    find_firmware() {
+        local name dir
+        local dirs=(/usr/share/qemu /usr/share/edk2/aarch64 /usr/share/edk2/x64
+                    /usr/share/edk2/ovmf /usr/share/OVMF /usr/share/AAVMF
+                    /usr/share/qemu-efi-aarch64)
+        if command -v brew >/dev/null 2>&1; then
+            local prefix
+            prefix="$(brew --prefix qemu 2>/dev/null || true)"
+            [ -n "$prefix" ] && dirs=("${prefix}/share/qemu" "${dirs[@]}")
+        fi
+        for name in "$@"; do
+            for dir in "${dirs[@]}"; do
+                [ -f "${dir}/${name}" ] && { echo "${dir}/${name}"; return 0; }
+            done
+        done
+        echo "just vm-run: no UEFI firmware found. Looked for [$*] in:" >&2
+        printf '  %s\n' "${dirs[@]}" >&2
+        echo "Install one: macOS 'brew install qemu'; Fedora 'edk2-ovmf'/'edk2-aarch64';" >&2
+        echo "Debian/Ubuntu 'ovmf'/'qemu-efi-aarch64'." >&2
+        return 1
+    }
 
     host_arch="$(uname -m)"
     accel=tcg
@@ -208,22 +251,26 @@ vm-run arch="x86_64" mode="gui":
         Linux)  [ -w /dev/kvm ] && [ "{{ arch }}" = "$host_arch" ] && accel=kvm ;;
     esac
 
+    # shellcheck disable=SC2054  # the commas are inside quoted qemu arguments
     common=(-m 4096 -smp 4 -drive "file=${disk},if=virtio,format=qcow2"
             -device virtio-net-pci,netdev=n0 -netdev user,id=n0
             -device virtio-rng-pci)
 
     case "{{ arch }}" in
         aarch64)
-            fw="$(brew --prefix qemu 2>/dev/null)/share/qemu/edk2-aarch64-code.fd"
-            [ -f "$fw" ] || fw=/usr/share/AAVMF/AAVMF_CODE.fd
+            fw="$(find_firmware edk2-aarch64-code.fd QEMU_EFI.fd AAVMF_CODE.fd)"
             bin=qemu-system-aarch64
             args=(-M virt -cpu host -bios "$fw" -device virtio-gpu-pci
                   -device qemu-xhci -device usb-kbd -device usb-tablet)
             [ "$accel" = "tcg" ] && args=("${args[@]/-cpu host/-cpu cortex-a72}")
             ;;
         x86_64)
+            # ADR-013 makes UEFI the first-class boot path, and bootc-image-builder
+            # emits a UEFI-oriented qcow2. Booting SeaBIOS here would not work.
+            fw="$(find_firmware edk2-x86_64-code.fd OVMF_CODE.fd OVMF.fd)"
             bin=qemu-system-x86_64
-            args=(-M q35 -device virtio-vga -device qemu-xhci -device usb-kbd -device usb-tablet)
+            args=(-M q35 -bios "$fw" -device virtio-vga
+                  -device qemu-xhci -device usb-kbd -device usb-tablet)
             ;;
         *) echo "just vm-run: unknown arch '{{ arch }}'"; exit 1 ;;
     esac
@@ -281,13 +328,17 @@ verify-base:
     #!/usr/bin/env bash
     set -euo pipefail
     out="os/scripts/build/verify-base.latest.txt"
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
     {
         echo "# Generated by os/scripts/build/verify-base.sh — ADR-002 evidence."
         echo "# Regenerate with: just verify-base"
-        echo "# Run on: $(date -u +%Y-%m-%d) (host: $(uname -s | tr 'A-Z' 'a-z')/$(uname -m))"
+        echo "# Run on: $(date -u +%Y-%m-%d) (host: $(uname -s | tr '[:upper:]' '[:lower:]')/$(uname -m))"
         echo
         ./os/scripts/build/verify-base.sh
-    } > "$out"
+    } > "$tmp"
+    # Only replace the committed evidence once the run actually succeeded.
+    mv "$tmp" "$out"
     cat "$out"
     {
         echo "# Generated by 'just verify-base'. Do not edit — it records the ADR-002"

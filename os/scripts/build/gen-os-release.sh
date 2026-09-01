@@ -82,8 +82,14 @@ BARE = re.compile(r"^[A-Za-z0-9._:/@+-]+$")
 
 def emit(key, value):
     value = str(value)
+    if "\n" in value or "\r" in value:
+        raise SystemExit(f"gen-os-release: {key} contains a newline; refusing to emit")
     if not BARE.match(value):
-        value = '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+        # /etc/os-release is *sourced* by root-run shell scripts across the
+        # system, so $ and ` must be escaped too, not just \ and ".
+        for char in ("\\", '"', "$", "`"):
+            value = value.replace(char, "\\" + char)
+        value = f'"{value}"'
     print(f"{key}={value}")
 
 

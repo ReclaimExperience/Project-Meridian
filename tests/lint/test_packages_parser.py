@@ -26,6 +26,7 @@ SCRIPT = ROOT / "os" / "scripts" / "build" / "apply-packages.sh"
 
 KEYS = ["add", "remove", "systemd.mask", "systemd.disable"]
 
+# Inputs the parser must read EXACTLY as PyYAML does.
 CASES = {
     "empty lists": "version: 1\nadd: []\nremove: []\nsystemd:\n  mask: []\n  disable: []\n",
     "block lists": (
@@ -42,6 +43,23 @@ CASES = {
         "systemd:\n  mask: []\n  disable: []\n"
     ),
     "the real manifest": (ROOT / "os" / "packages.yml").read_text(),
+}
+
+
+# Inputs that are valid YAML — and pass catalog/schemas/packages.schema.json —
+# but that the restricted parser is not certain about. Every one of these was
+# found by an independent review agent silently returning [] or, worse, a
+# UNION of duplicate keys where PyYAML keeps only the last. The requirement is
+# not that the parser handle them; it is that it REFUSE them loudly rather than
+# hand a wrong package list to dnf.
+MUST_REJECT = {
+    "multi-line flow sequence": "version: 1\nadd: [\n  haruna,\n  thermald\n]\nremove: []\n",
+    "quoted key": 'version: 1\n"add":\n  - haruna\nremove: []\n',
+    "anchor and alias": "version: 1\nadd: &pkgs\n  - haruna\nremove: *pkgs\n",
+    "duplicate key": "version: 1\nadd:\n  - haruna\nadd:\n  - thermald\nremove: []\n",
+    "odd indentation": "version: 1\nadd: []\nremove: []\nsystemd:\n mask:\n   - baloo.service\n",
+    "space before colon": "version: 1\nadd : [haruna]\nremove: []\n",
+    "flow mapping": "version: 1\nadd: []\nremove: []\nsystemd: {mask: [a.service], disable: []}\n",
 }
 
 
@@ -73,6 +91,7 @@ def main() -> int:
         for name, text in CASES.items():
             case_file.write_text(text)
             truth = yaml.safe_load(text)
+            mismatches = 0
             for key in KEYS:
                 expected = lookup(truth, key)
                 result = subprocess.run(
@@ -86,14 +105,35 @@ def main() -> int:
                     print(f"  MISMATCH  {name} / {key}")
                     print(f"      pyyaml:     {expected}")
                     print(f"      restricted: {got}")
-                    failures += 1
-            if not failures:
-                print(f"  ok  {name}")
+                    mismatches += 1
+            failures += mismatches
+            if not mismatches:
+                print(f"  ok    {name}")
+
+        # Now the adversarial set: the parser must exit non-zero, not differ.
+        for name, text in MUST_REJECT.items():
+            case_file.write_text(text)
+            result = subprocess.run(
+                [sys.executable, str(parser), str(case_file), "add"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                print(f"  ACCEPTED  {name}  -> {result.stdout.split()!r}")
+                print("      the parser must refuse input it cannot read exactly")
+                failures += 1
+            else:
+                first = (result.stderr.strip().split(chr(10)) or [""])[0]
+                print(f"  reject  {name}  ({first.split(': ', 2)[-1]})")
 
     if failures:
         print(f"\npackages-parser: {failures} disagreement(s) with PyYAML")
         return 1
-    print(f"\npackages-parser: agrees with PyYAML across {len(CASES)} cases")
+    print(
+        f"\npackages-parser: agrees with PyYAML across {len(CASES)} cases, "
+        f"refuses {len(MUST_REJECT)} ambiguous ones"
+    )
     return 0
 
 

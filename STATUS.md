@@ -144,19 +144,32 @@ deliberately and record which scheme is authoritative.
 `.github/workflows/build.yml` (both arches).
 
 **Verified locally (aarch64, Apple Silicon, HVF):** `just build` → `just vm-image`
-→ `just vm-run` boots to the SDDM graphical greeter. 213 units OK, **zero**
-systemd unit failures. Screenshot: `docs/qa/evidence/wp-01-first-boot-aarch64.png`
-— its footer reads "Powered by Meridian OS", proving branding.json → os-release →
-greeter end to end. `bootc container lint`: 13 passed. Labels verified on the
-built image. qcow2 is 3.6 GB.
+→ `just vm-run` boots to a **graphical session**: 213 units OK, **zero** systemd
+unit failures, `bootc container lint` 13 passed, qcow2 3.6 GB, labels correct on
+the built image. Screenshot: `docs/qa/evidence/wp-01-first-boot-aarch64.png`; its
+footer reads "Powered by Meridian OS", proving branding.json → os-release → UI
+end to end.
+
+**Correction (found in review):** that screenshot is Plasma's `plasma-welcome`
+initial-setup screen, **not** an SDDM login greeter — there is no user list and no
+password field, because the qcow2 has no user account. The acceptance item says
+"reaches SDDM greeter", so it is **NOT MET**. What is proven is that the graphical
+target comes up and a session starts. The greeter itself needs a user account and
+is re-checked after WP-02 removes `plasma-welcome` (PRD 3.2).
 
 **NOT yet verified — this WP is not done:**
 
-- x86_64 build has never run (CI has never run; blocked on `gh auth login`).
-- Nothing has been pushed to a registry, so the acceptance item "`skopeo inspect`
-  of the *pushed* image shows our labels" is unproven. Labels are confirmed only
-  on the locally built image.
-- Both-arch CI green: unproven.
+- **SDDM login greeter** — see the correction above. A graphical session starts;
+  the greeter has not been shown.
+- `just vm-run x86_64` has never been executed. Until this review it also passed
+  no UEFI firmware and would have booted SeaBIOS against a UEFI qcow2; firmware
+  resolution is now shared by both arches but the x86_64 boot remains unverified.
+
+**Now proven (2026-09-01, after `gh auth login`):** both arches build, push and
+verify their labels in CI. Free `ubuntu-24.04-arm` runners are available to this
+repo, resolving the PRD 7.3 `[VERIFY]`. x86_64 first failed with "no space left on
+device" — hosted runners have ~14 GB on `/` and the ublue base does not fit;
+`ci/prepare-runner.sh` moves the container store to `/mnt`.
 
 **Deviations:**
 
@@ -192,3 +205,29 @@ built image. qcow2 is 3.6 GB.
 - ublue `kinoite-nvidia` tag scheme still unresolved for WP-18 (see pre-flight note).
 - WP-02 should note the base ships `plasma-welcome`; it is what the first-boot
   screenshot shows, and PRD 3.2 lists it for removal.
+
+## Review response — WP-00 / WP-01 (independent agent, PRD 14.5)
+
+An independent reviewer returned **CHANGES REQUESTED** with 2 blockers and 4
+majors. All blockers and the named minimum set are fixed; the findings are
+recorded here because several are traps a later WP could re-enter.
+
+| ID | Finding | Fix |
+|---|---|---|
+| B-1 | The restricted YAML parser silently disagreed with PyYAML on **7 schema-valid inputs** — multi-line flow sequences, quoted keys, anchors/aliases, duplicate keys (parser returned the *union*, PyYAML keeps the last), odd indentation, space before colon, flow mappings. A wrong package list would have reached `dnf` with a green build. | Parser is now strict and hard-errors on all seven instead of returning `[]`. All seven are permanent cases in `tests/lint/test_packages_parser.py`. |
+| B-2 | The `usr/etc` → `etc` move orphaned two CODEOWNERS rules — **polkit and the image signing policy**, the two most security-sensitive surfaces — so R-H would have silently stopped gating them. | Paths repointed; `tests/lint/codeowners.sh` now fails any rule whose parent directory cannot exist. |
+| M-3 | `ci/build.sh` regenerated `os/base-images.env` on every CI run. A transient registry error makes `verify-base.sh` emit `DECISION=fedora-fallback` **and exit 0**, so CI could have built the user-facing x86_64 image on a base with no driver stack and pushed it to `:testing`. Green build, wrong OS. | CI is compare-only: it fails if the live decision differs from the committed record. `arches_of()` retries before concluding an image is missing. `just verify-base` writes atomically so a failure no longer truncates its own evidence. |
+| M-4 | "Boots to the SDDM greeter" overclaimed what the screenshot shows. | Corrected above; the acceptance item is marked NOT MET. |
+| M-5 | `just vm-run` had two silent aborts (`find` under `pipefail` made its own error branch unreachable; `brew --prefix` failure exited 127 with no output on any non-Homebrew machine) and passed **no UEFI firmware for x86_64** despite ADR-013. | Firmware is resolved across macOS/Fedora/Debian paths with a clear error listing what it looked for; both aborts fixed and reproduced as fixed. |
+| M-6 | ~200 lines of shell inside Justfile recipes were never linted — where every shell defect so far has lived. | `tests/lint/justfile_shell.py` extracts each recipe body and shellchecks it. 7 recipes, all clean. |
+| F-7 | `gen-os-release.sh` escaped `\` and `"` but not `$` or backtick; os-release is *sourced* by root-run scripts. | Both escaped; newlines rejected outright. |
+| F-9 | The strings lint covered exactly one file; `branding.json`'s name and tagline — the most user-visible strings shipping today — were unlinted. | branding.json added to scope (5 → 7 strings). |
+| F-10 | `EXCLUDE_RE` was not end-anchored, so `README.md.probe` inherited `README.md`'s exemption. | Anchored — and the first attempt over-anchored and silently unexcluded the whole `docs/` tree, so the self-test now asserts **both** directions. |
+| F-12 | The build workflow invoked `ci/build.sh` twice per job (two full builds, two chances for the base decision to drift) and passed the token via `-p`, visible in `/proc`. | One invocation; `--password-stdin`. |
+| F-14 | `bootstrap-issues.py` reported 27 parsed where 26 are created. | Message states both numbers. |
+
+**Deferred, with owner visibility:** F-8 (`local -n` in `apply-packages.sh` needs
+bash 4.3, so the script cannot be exercised on the Mac's bash 3.2 — it only ever
+runs inside the Fedora container); F-13 (`just test-lint` writes to the git index);
+F-14's note that `.gitkeep` exclusion means `catalog/`/`compat/` directories will
+not exist in the image, which WP-13/WP-15 must create rather than assume.

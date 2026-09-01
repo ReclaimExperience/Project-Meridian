@@ -59,7 +59,7 @@ DESKTOP_RE = re.compile(
     r"^(?:Name|GenericName|Comment|Keywords)(?:\[[^\]]+\])?\s*=\s*(.+)$", re.MULTILINE
 )
 JSON_STR_RE = re.compile(
-    r'"(?:name|blurb|note|replaces|description|title|message)"\s*:\s*"([^"]+)"'
+    r'"(?:name|blurb|note|replaces|description|title|message|tagline)"\s*:\s*"([^"]+)"'
 )
 
 
@@ -92,6 +92,10 @@ def extract(path: Path) -> list[tuple[int, str]]:
         return with_lines(DESKTOP_RE)
     # catalog/*.json is user-visible editorial copy; catalog/schemas/*.json is
     # developer-facing metadata and must not be linted as UI text.
+    # branding.json's name and tagline ship today: the tagline becomes the
+    # image description and surfaces in About. Lint them like any other copy.
+    if rel.endswith("share/meridian/branding.json"):
+        return with_lines(JSON_STR_RE)
     if (
         rel.startswith("catalog/")
         and not rel.startswith("catalog/schemas/")

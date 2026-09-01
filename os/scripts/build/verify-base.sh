@@ -30,8 +30,16 @@ command -v skopeo >/dev/null || { echo "verify-base: skopeo is required"; exit 1
 # Architectures in an image's manifest. A single (non-index) manifest reports
 # exactly one arch, read from its config.
 arches_of() {
-    local ref="$1" raw
-    raw="$(skopeo inspect --raw "docker://${ref}" 2>/dev/null)" || return 1
+    local ref="$1" raw attempt
+    # Retry before concluding an image is missing. arches_of() returning empty
+    # drives DECISION=fedora-fallback, which swaps the user-facing x86_64 base
+    # for one without ublue's driver stack — far too consequential to trigger on
+    # a single transient registry error.
+    for attempt in 1 2 3; do
+        raw="$(skopeo inspect --raw "docker://${ref}" 2>/dev/null)" && break
+        [ "$attempt" -lt 3 ] && sleep $((attempt * 3))
+    done
+    [ -n "${raw:-}" ] || return 1
     if printf '%s' "$raw" | grep -q '"manifests"'; then
         printf '%s' "$raw" | python3 -c '
 import json,sys
