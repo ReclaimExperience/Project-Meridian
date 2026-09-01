@@ -164,6 +164,13 @@ build arch="x86_64":
     echo "  base:     ${base}"
     echo "  platform: ${platform}"
 
+    # Pull the base separately, with retries. `podman build` does its own pull
+    # with none, and a single CDN hiccup from the registry then fails the whole
+    # job — which happened: "unable to copy from source ...fedora-kinoite:44:
+    # unexpected EOF (while reconnecting)". Rule R-A treats flaky as broken, so
+    # the transient case gets handled rather than re-run.
+    podman pull --retry 3 --retry-delay 5s --platform "${platform}" "${base}"
+
     podman build \
         --platform "${platform}" \
         --build-arg "BASE_IMAGE=${base}" \
