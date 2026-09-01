@@ -39,6 +39,16 @@ graphroot = "${STORAGE_ROOT}/storage"
 runroot = "/run/user/$(id -u)/containers"
 CONF
 
+# bootc-image-builder refuses to run rootless, so the ROOT store needs the same
+# treatment — and root's default graphroot is on /, which cannot hold an OS image.
+sudo mkdir -p "${STORAGE_ROOT}/storage-root" /etc/containers
+sudo tee /etc/containers/storage.conf >/dev/null <<CONF
+[storage]
+driver = "overlay"
+graphroot = "${STORAGE_ROOT}/storage-root"
+runroot = "/run/containers/storage"
+CONF
+
 echo "after:"
 df -h / /mnt 2>/dev/null | sed 's/^/  /'
 echo "podman graphroot: $(podman info --format '{{ .Store.GraphRoot }}')"

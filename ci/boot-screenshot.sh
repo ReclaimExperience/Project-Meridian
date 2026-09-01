@@ -50,7 +50,20 @@ fi
 echo "::endgroup::"
 
 echo "::group::build the disk image"
-just vm-image "$ARCH"
+# bootc-image-builder refuses to run rootless. On CI the image was built by the
+# runner user, so hand it to root's store first — the two stores are separate.
+if [[ "$(podman info --format '{{ .Host.Security.Rootless }}')" == "true" ]]; then
+    BRANDING=os/rootfs/usr/share/meridian/branding.json
+    IMAGE="$(python3 -c "import json;d=json.load(open('${BRANDING}'));print(d['registry']['namespace']+'/'+d['registry']['image'])")"
+    echo "  transferring ${IMAGE}:testing-${ARCH} into rootful storage"
+    podman save "${IMAGE}:testing-${ARCH}" | sudo podman load
+    SUDO=(sudo -E env "PATH=${PATH}")
+else
+    SUDO=()
+fi
+"${SUDO[@]}" just vm-image "$ARCH"
+# bootc-image-builder writes as root; the upload step needs to read it.
+sudo chown -R "$(id -u):$(id -g)" build
 echo "::endgroup::"
 
 DISK="$(find build -name '*.qcow2' | head -1)"
