@@ -4,26 +4,23 @@
 # mistake is expensive or irreversible: settled architecture, what ships in the
 # image, the privilege boundary, and the pipeline that reaches users' machines.
 #
-# !! PARTIALLY ARMED — one step outstanding !!
+# ARMED. All three preconditions are satisfied and verified:
 #
-#   [x] Repo is public, so branch protection is available (free plan).
+#   [x] Repo is public, so branch protection is available on the free plan.
 #   [x] Branch protection on `main`: lint + build-x86_64 + build-aarch64 must
 #       pass, code-owner review required, 1 approval, stale reviews dismissed,
-#       linear history, no force pushes or deletions. Admins may bypass.
-#   [ ] The `owners` team has NO write access to this repo, so every rule below
-#       currently fails to resolve and gates NOTHING.
+#       linear history, no force pushes or deletions. Admins may bypass, because
+#       GitHub forbids self-approval and full enforcement would deadlock a solo
+#       owner's own pull requests.
+#   [x] The `owners` team has write access, so every rule below resolves.
 #
-# GitHub's own validator confirms it:
-#   gh api 'repos/{owner}/{repo}/codeowners/errors'
-#   -> "Unknown owner ... make sure the team @ReclaimExperience/owners exists,
-#       is publicly visible, and has write access to the repository"
+# That last one is the fragile part and it fails SILENTLY: GitHub applies no
+# review requirement at all for an unresolvable owner, and the file still reads
+# like a gate. The lint workflow therefore asks GitHub directly on every run:
 #
-# To arm it (needs org admin; a `repo`-scoped token cannot do this):
-#   gh api -X PUT 'orgs/{owner}/teams/owners/repos/{owner}/{repo}' -f permission=push
-#   gh api -X PATCH 'orgs/{owner}/teams/owners' -f privacy=closed
-# Then re-check that the errors list is empty.
+#   gh api 'repos/{owner}/{repo}/codeowners/errors'   -> must be empty
 #
-# Until that is done, rule R-H is a convention, not a gate.
+# Check that first if a rule here ever appears not to be doing its job.
 
 # Settled law. Changing an ADR is an owner decision, never an agent's (PRD 0.1).
 /docs/adr/                  @ReclaimExperience/owners
@@ -33,9 +30,9 @@
 /os/packages.yml            @ReclaimExperience/owners
 
 # The privilege boundary (ADR-015). Three custom polkit actions exist in total.
-/os/rootfs/etc/polkit-1/        @ReclaimExperience/owners
-/os/rootfs/usr/share/polkit-1/  @ReclaimExperience/owners
-/docs/security-notes.md         @ReclaimExperience/owners
+/os/rootfs/etc/polkit-1/        @ReclaimExperience/owners  # planned: WP-12
+/os/rootfs/usr/share/polkit-1/  @ReclaimExperience/owners  # planned: WP-12
+/docs/security-notes.md         @ReclaimExperience/owners  # planned: WP-13
 
 # The pipeline that reaches users' machines, and image signing policy (ADR-014).
 /ci/                                        @ReclaimExperience/owners

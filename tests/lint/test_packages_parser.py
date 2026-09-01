@@ -71,11 +71,33 @@ MUST_REJECT = {
     "flow mapping": (
         "version: 1\nadd: []\nremove: []\nsystemd: {mask: [a.service], disable: []}\n"
     ),
-    "yaml tag": (
+    # --- block form -------------------------------------------------------
+    "block yaml tag": (
         "version: 1\nadd: []\nremove: []\n"
         "systemd:\n  mask:\n    - !!str foo.service\n  disable: []\n"
     ),
-    "backslash escape": 'version: 1\nadd:\n  - "haruna\\x2Dextra"\nremove: []\n',
+    "block backslash escape": 'version: 1\nadd:\n  - "haruna\\x2Dextra"\nremove: []\n',
+    "block anchor on an item": "version: 1\nadd:\n  - &a haruna\nremove: []\n",
+    # --- flow form: the SAME defects, delivered the other way --------------
+    #
+    # These exist because a previous round guarded only the block branch while
+    # the shipped os/packages.yml uses the flow form on every list. The guards
+    # were on the path the real file never takes, and
+    # `mask: ["baloo\x5Ffile.service"]` masked a nonexistent unit, exit 0.
+    # Any new rule must be proven in BOTH forms or it is not proven.
+    "flow yaml tag": "version: 1\nadd: [!!str haruna]\nremove: []\n",
+    "flow backslash escape": 'version: 1\nadd: ["haruna\\x2Dextra"]\nremove: []\n',
+    "flow anchor": "version: 1\nadd: [&a haruna]\nremove: []\n",
+    "flow mask escape": (
+        "version: 1\nadd: []\nremove: []\n"
+        'systemd:\n  mask: ["baloo\\x5Ffile.service"]\n  disable: []\n'
+    ),
+    "flow unicode escape": 'version: 1\nadd: ["harun\\u0061"]\nremove: []\n',
+    "flow whitespace in element": 'version: 1\nadd: ["two words"]\nremove: []\n',
+    # --- structure: an absent key is not an empty one ----------------------
+    "missing add key": "version: 1\nremove: []\n",
+    "typo'd keys": "version: 1\nadds:\n  - alpha\nremoves:\n  - beta\n",
+    "empty file": "",
 }
 
 STUB = """#!/bin/sh
@@ -137,8 +159,44 @@ def observed_actions(actions: str) -> dict[str, list[str]]:
     return seen
 
 
+def schema_valid(text: str) -> bool:
+    """Does this manifest pass catalog/schemas/packages.schema.json?"""
+    import json
+
+    from jsonschema import Draft202012Validator
+
+    schema = json.loads((ROOT / "catalog/schemas/packages.schema.json").read_text())
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return False
+    return not list(Draft202012Validator(schema).iter_errors(data))
+
+
 def main() -> int:
     failures = 0
+
+    # A rejection case only proves something if the input is one the schema
+    # would let through. Otherwise the test is asserting that the parser refuses
+    # input nothing would ever hand it. Structural cases are exempt: they are
+    # the ones the schema itself catches, and the point is that the build path
+    # never runs the schema.
+    # Cases the schema itself also rejects. They still belong in the suite —
+    # the build path never runs the schema — but they are not evidence about
+    # schema-valid input, so they are exempt from the check above.
+    STRUCTURAL = {
+        "missing add key",
+        "typo'd keys",
+        "empty file",
+        "flow whitespace in element",
+    }
+    for name, text in MUST_REJECT.items():
+        if name in STRUCTURAL:
+            continue
+        if not schema_valid(text):
+            print(f"  WEAK CASE  '{name}' does not pass packages.schema.json,")
+            print("      so refusing it proves nothing about real-world input.")
+            failures += 1
 
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)

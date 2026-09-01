@@ -24,9 +24,41 @@ _todo wp target:
 # ------------------------------------------------------------------- lint ---
 
 # Full lint suite (PRD 6.3). Green from day one — this is WP-00's acceptance.
-lint: lint-shell lint-justfile lint-python lint-schemas lint-branding lint-strings lint-codeowners lint-markdown
+lint: lint-toolchain lint-shell lint-justfile lint-python lint-schemas lint-branding lint-strings lint-codeowners lint-markdown
     @echo
     @echo "lint: all checks passed"
+
+# Fail when the local linters differ from ci/tool-versions.env. A green run on a
+# different shellcheck says nothing about CI — that exact drift made `just lint`
+# green locally and red in CI on the same commit. Set MERIDIAN_ALLOW_TOOL_DRIFT=1
+# to proceed anyway, knowing the result is not comparable to CI's.
+lint-toolchain:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Resolved at runtime relative to the repo root; shellcheck cannot follow it.
+    # shellcheck source=/dev/null
+    source ci/tool-versions.env
+    drift=0
+    check() {
+        if [ "$2" != "$3" ]; then
+            echo "  $1: have $3, pinned $2"
+            drift=1
+        fi
+    }
+    check shellcheck   "$SHELLCHECK_VERSION"   "$(shellcheck --version | awk '/^version:/{print $2}')"
+    check ruff         "$RUFF_VERSION"         "$(ruff --version | awk '{print $2}')"
+    check markdownlint "$MARKDOWNLINT_VERSION" "$(markdownlint --version 2>/dev/null || echo absent)"
+    if [ "$drift" -ne 0 ]; then
+        if [ "${MERIDIAN_ALLOW_TOOL_DRIFT:-0}" = "1" ]; then
+            echo "  lint-toolchain: drift allowed by MERIDIAN_ALLOW_TOOL_DRIFT=1 — results are NOT comparable to CI"
+            exit 0
+        fi
+        echo "  lint-toolchain: FAILED — pinned versions live in ci/tool-versions.env."
+        echo "                  Install the pinned versions, or set"
+        echo "                  MERIDIAN_ALLOW_TOOL_DRIFT=1 to accept a result CI will not reproduce."
+        exit 1
+    fi
+    echo "  lint-toolchain: matches ci/tool-versions.env"
 
 # shellcheck every tracked shell script
 lint-shell:

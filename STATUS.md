@@ -252,8 +252,8 @@ against the shipped artifact.**
 | ID | What was actually wrong | Fix, and how it is now proven |
 |---|---|---|
 | N-1 (blocker) | The parser was made strict; the **call site threw its exit status away**. `mapfile_compat` read it through `< <(cmd)`, which does not propagate status, so every strict rejection printed an error and became an empty list — exit 0. This was **worse than the original bug**: one ambiguous line emptied all four lists, so packages were silently not installed, removals not performed, masks not applied, build green. A missing `python3` did the same. | Reads now use a plain assignment (which *does* carry status) and abort the build. `python3` presence is checked explicitly. Proven by reintroducing the exact bug and watching the test go red. |
-| N-2 (major) | The new `codeowners.sh` walked *up* until it found any existing ancestor, so `/os/rootfs/usr/etc/polkit-1/` passed because `os/rootfs/usr/` exists. It reported "clean" on the exact rules B-2 was about. | Now requires the **immediate** parent to exist, or an explicit `# planned: WP-NN` marker. Proven by re-injecting the original stale rules: exit 1. |
-| N-3 (major) | YAML tags (`!!str foo.service`) and backslash escapes in double-quoted scalars (`"haruna\x2Dextra"`) were accepted and mis-decoded, exit 0. Dangerous for unit names: `systemctl mask` accepts any string, so a mis-decoded name masks nothing, silently. | Both rejected. |
+| N-2 (major) | The new `codeowners.sh` walked *up* until it found any existing ancestor, so it reported "clean" on the exact rules B-2 was about. | **First attempt caught one shape only — see round three below.** |
+| N-3 (major) | YAML tags and backslash escapes were accepted and mis-decoded, exit 0. | **First attempt fixed only the block branch — see round three below. The shipped manifest uses the flow form.** |
 | N-4 (medium) | Merging the Build and Push steps dropped the fork-PR guard while still always passing `--push`, so a fork PR would build and then fail on a push it had no credentials for. ADR-014 makes fork PRs a real path. | Push is conditional; fork PRs build and say why they skip the push. |
 | N-5 (minor) | The Justfile shell lint's header regex skipped `_`-prefixed recipes, so `_todo`'s body was unlinted while the lint said "clean". | Regex widened, plus a completeness check that fails when the shebang count exceeds the extracted-recipe count. Proven by narrowing the regex and watching it fire. |
 | N-6 (minor) | The parser test extracted the heredoc and tested it **standalone** — a code path the shipped script never took. This is what hid N-1 for a whole round. | Rewritten to drive the real `apply-packages.sh` with `dnf`/`systemctl` stubs that record their arguments, comparing actual actions against PyYAML, and asserting rejected manifests produce **no side effects at all**. |
@@ -289,3 +289,28 @@ non-blocking "for now" is how gates rot.
 Secret scan after going public: no credentials, tokens, keys or PII in tracked
 content or in any deleted file across the whole history. Commit author emails
 are visible, which is normal for a public repo.
+
+## Third review round — the same mistake, one layer down
+
+Third consecutive **CHANGES REQUESTED**. The pattern repeated exactly: each fix
+was verified against *a* path rather than *the* path.
+
+| ID | What was still wrong | Fix, and how it is proven now |
+|---|---|---|
+| N-3 (blocker) | The tag/escape guards went on the **block-sequence** branch. A value can also arrive via a **flow sequence**, and the shipped `os/packages.yml` uses the flow form on all four lists — so the guards sat on the branch the real file never takes. `mask: ["baloo\x5Ffile.service"]` ran `systemctl mask baloo\x5Ffile.service`, which succeeds against a nonexistent unit: **Baloo silently not masked (ADR-016), exit 0, green build.** 25 silent divergences found. | Validation moved into one `validate_scalar()` that **both** routes call. The parser file now carries a warning that a rule added to one branch is not added. `MUST_REJECT` gained a flow variant of every defect; the suite went 9 → 19 cases. Confirmed against the shipped script in a container: exit 2. |
+| N-2 (major) | The rewritten `codeowners.sh` caught the one historical shape and essentially nothing else — a typo of a live rule, a renamed subdirectory, or a file that will never exist all passed, and it false-positived on legal globs. | Rewritten to expand each pattern against the real git index the way GitHub does, requiring ≥1 match or a `# planned: WP-NN` marker. All five shapes the reviewer listed as missed are now caught; four globs accepted, a glob matching nothing still caught. It immediately failed 3 live rules the previous version called clean — those are now honestly marked planned. |
+| N-5 (major) | The completeness check compared shebang count to extracted-recipe count and never checked the body was **non-empty**. Tab- and 2-space-indented recipes extracted as empty and were reported `ok`; non-shebang recipes were not linted at all. | Indent is derived from the body; an empty or truncated body is an error. Completeness is now checked against `just --dump --dump-format json` — `just`'s own answer — instead of against our parser agreeing with itself. **That immediately exposed a fresh regression of the same class: the header pattern excluded `=`, so `build`, `vm-image`, `vm-run` and `vm-test` were silently unlinted.** Coverage went 8 → 23 recipes. All six shapes in the reviewer's break matrix are caught. |
+| NEW-1 (major) | The script never checked that `version`, `add` and `remove` were **present**. A typo (`adds:`) or a truncated file exited 0 having done nothing. The build path never runs the schema, so nothing else would catch it. | Required keys are enforced, unknown keys rejected, in the parser itself. |
+| NEW-2 (minor) | The lint workflow installed `jsonschema` but not `PyYAML`, which two lint scripts import — working only because the hosted image happens to ship it. | Installed explicitly. |
+| NEW-3 (minor) | The version-pin check only **warned**, so a laptop on a different shellcheck still got a green `just lint` — the exact drift the pins exist to stop. | `lint-toolchain` now fails, with `MERIDIAN_ALLOW_TOOL_DRIFT=1` as a documented, explicit escape hatch. |
+| NEW-4 (minor) | `#` was stripped regardless of quoting, and `---` was a hard failure. | Comment stripping is quote-aware; document markers are ignored. |
+
+**The standing lesson, restated because three rounds did not teach it:** ask which
+code path the *real input* takes before declaring a fix proven. Round one fixed
+the parser and not the call site; round two fixed the block branch and not the
+flow branch; round three found the header pattern silently dropping the four
+largest recipes. In each case the test agreed with the fix because the test
+exercised the same wrong path. **Completeness checks must be answered by an
+external authority** — `just --dump` for recipes, `git ls-files` for CODEOWNERS
+patterns, PyYAML for manifests, GitHub for owner resolution — never by our own
+parser agreeing with itself.
