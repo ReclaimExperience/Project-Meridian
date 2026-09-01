@@ -1,0 +1,6 @@
+# Justified exceptions to the user-visible string lint (tests/lint/strings.py).
+# Format:  <repo-relative path>::<substring that must appear in the string>::<reason>
+#
+# Every entry is a small admission that the product could not say it plainly.
+# Reviewers should push back on each one. Empty at WP-00 — keep it that way as
+# long as possible.

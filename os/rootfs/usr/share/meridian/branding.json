@@ -1,0 +1,23 @@
+{
+  "$schema": "../../../../../../catalog/schemas/branding.schema.json",
+  "id": "meridian",
+  "name": "Meridian OS",
+  "shortName": "Meridian",
+  "codename": "Project Migration",
+  "version": "1.0.0-dev",
+  "versionCodename": "",
+  "tagline": "Your computer, quiet and familiar.",
+  "urls": {
+    "home": "https://reclaimexperience.github.io/Project-Meridian/",
+    "download": "https://reclaimexperience.github.io/Project-Meridian/",
+    "help": "https://reclaimexperience.github.io/Project-Meridian/help/",
+    "source": "https://github.com/ReclaimExperience/Project-Meridian",
+    "issues": "https://github.com/ReclaimExperience/Project-Meridian/issues"
+  },
+  "supportEmail": null,
+  "registry": {
+    "namespace": "ghcr.io/reclaimexperience",
+    "image": "project-meridian",
+    "channels": ["stable", "testing"]
+  }
+}

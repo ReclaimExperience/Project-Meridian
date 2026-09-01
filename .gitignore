@@ -1,0 +1,15 @@
+# Build outputs — everything here is reproducible via `just` (PRD 7.1)
+/build/
+*.qcow2
+*.iso
+*.raw
+SHA256SUMS
+
+# Local tool state
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+
+# macOS
+.DS_Store
