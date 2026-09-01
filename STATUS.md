@@ -165,11 +165,21 @@ is re-checked after WP-02 removes `plasma-welcome` (PRD 3.2).
   no UEFI firmware and would have booted SeaBIOS against a UEFI qcow2; firmware
   resolution is now shared by both arches but the x86_64 boot remains unverified.
 
-**Now proven (2026-09-01, after `gh auth login`):** both arches build, push and
-verify their labels in CI. Free `ubuntu-24.04-arm` runners are available to this
-repo, resolving the PRD 7.3 `[VERIFY]`. x86_64 first failed with "no space left on
-device" — hosted runners have ~14 GB on `/` and the ublue base does not fit;
-`ci/prepare-runner.sh` moves the container store to `/mnt`.
+**Now proven (2026-09-01, after `gh auth login`):**
+
+- Both arches build, push and verify their labels in CI. `skopeo inspect` of the
+  **pushed** x86_64 image reports `base.name=ghcr.io/ublue-os/kinoite-main:44`,
+  confirming the ADR-002 split base is real on both sides, not just on paper.
+- Free `ubuntu-24.04-arm` runners are available to this repo, resolving the
+  PRD 7.3 `[VERIFY]`. Record the fallback (qemu cross-build, nightly only) as
+  unused.
+- x86_64 first failed with "no space left on device": hosted runners have ~14 GB
+  on `/` and the ublue base does not fit. `ci/prepare-runner.sh` moves the
+  container store to `/mnt`. aarch64 had passed only because the Fedora Kinoite
+  dev base is smaller — luck, not headroom — so it runs for both arches.
+- Lint tool versions are pinned in `ci/tool-versions.env`. CI was installing
+  Ubuntu's shellcheck 0.9.0 while the dev machine had 0.11.0, so `just lint` was
+  green locally and red in CI on the same commit — a direct violation of PRD 7.1.
 
 **Deviations:**
 
