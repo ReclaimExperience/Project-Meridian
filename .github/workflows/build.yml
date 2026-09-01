@@ -38,6 +38,10 @@ jobs:
           sudo apt-get install -y -qq podman skopeo
           python3 -m pip install --quiet --break-system-packages jsonschema
 
+      # An OS image does not fit on a hosted runner's root disk. See the script.
+      - name: Prepare runner storage
+        run: bash ci/prepare-runner.sh
+
       - name: Log in to GHCR
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         run: podman login ghcr.io -u '${{ github.actor }}' -p '${{ secrets.GITHUB_TOKEN }}'
