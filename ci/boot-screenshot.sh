@@ -27,12 +27,20 @@ mkdir -p "$OUT"
 echo "::group::[VERIFY] KVM availability on this runner (PRD 7.3)"
 if [[ -e /dev/kvm ]]; then
     ls -l /dev/kvm
+    if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+        # Hosted runners ship /dev/kvm as root:kvm and the runner user is not in
+        # that group, so it is present but unusable until this is done.
+        echo "  present but not accessible to $(id -un); granting access"
+        sudo chmod 666 /dev/kvm || true
+    fi
     if [[ -r /dev/kvm && -w /dev/kvm ]]; then
-        echo "RESULT: /dev/kvm present and usable — WP-03 can plan on KVM."
+        echo "RESULT: /dev/kvm is USABLE on this runner (after 'sudo chmod 666 /dev/kvm')."
+        echo "        WP-03 can plan on KVM rather than the 3x-timeout TCG fallback,"
+        echo "        provided it grants access the same way."
         KVM=yes
     else
-        echo "RESULT: /dev/kvm present but NOT accessible to this user."
-        echo "        WP-03 must either fix permissions or fall back to TCG."
+        echo "RESULT: /dev/kvm present but could NOT be made accessible."
+        echo "        WP-03's TCG fallback applies."
         KVM=no
     fi
 else
