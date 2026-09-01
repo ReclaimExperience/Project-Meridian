@@ -1,0 +1,31 @@
+# Third-party notices
+
+STUB — seeded at WP-00, completed by WP-25 via the CI dependency scan (PRD 13).
+Every entry below must be present and accurate before 1.0 (release checklist 9.3
+item 10). An incomplete NOTICE is a release blocker, not a nice-to-have.
+
+## Licensing of this repository (PRD 13)
+
+| Scope | License |
+|---|---|
+| Original code (apps, plasmoids, harness, build scripts) | MIT — see LICENSE |
+| Documentation | CC-BY-SA-4.0 |
+| Theme assets derived from Breeze | LGPL-2.1-or-later (as upstream) |
+| Bundled fonts | OFL-1.1, with their own notices reproduced here |
+
+## Upstream components (to be enumerated by WP-25)
+
+- Fedora / Fedora Kinoite — base operating system
+- Universal Blue `kinoite-main` — driver and codec enablement layer
+- KDE Plasma, KWin, Dolphin, SDDM and KDE Frameworks — LGPL-2.1+/GPL-2.0+
+- Calamares — GPL-3.0-or-later
+- bootc, greenboot, Flatpak, PipeWire, NetworkManager, BlueZ, CUPS, fwupd
+- Fonts: Schibsted Grotesk, Inter, Noto, JetBrains Mono, Liberation, Carlito, Caladea
+
+## Trademarks
+
+"Windows" is a trademark of Microsoft Corporation. This project uses it
+nominatively only — to say truthfully that it runs many Windows programs. No
+endorsement is claimed or implied, and no Microsoft logos are used (PRD 13).
+Firefox is a trademark of the Mozilla Foundation and is redistributed unmodified.
+Other product names are the trademarks of their respective owners.

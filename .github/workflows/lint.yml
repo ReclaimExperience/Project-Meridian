@@ -1,0 +1,31 @@
+# Thin shim — the body lives in ci/lint.sh so it runs identically on a laptop
+# (PRD 7.1, 7.3).
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: extractions/setup-just@v3
+
+      - name: Install lint tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          pipx install ruff
+          pipx install check-jsonschema >/dev/null || true
+          python3 -m pip install --quiet --break-system-packages jsonschema
+          npm install -g markdownlint-cli >/dev/null
+
+      - name: Lint
+        run: bash ci/lint.sh

@@ -69,11 +69,14 @@ lint-markdown:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v markdownlint >/dev/null 2>&1; then
-        echo "  lint-markdown: markdownlint not installed — skipped (CI installs it)"; exit 0
+        echo "  lint-markdown: FAIL — markdownlint-cli is not installed."
+        echo "                 Install it (npm i -g markdownlint-cli); a skipped"
+        echo "                 check that reports success is how false greens start."
+        exit 1
     fi
     files=()
     while IFS= read -r f; do files+=("$f"); done < <(git ls-files '*.md')
-    markdownlint --config .markdownlint.json "${files[@]}"
+    markdownlint --config .markdownlint.json --ignore-path .markdownlintignore "${files[@]}"
     echo "  lint-markdown: clean"
 
 # prove the lints actually catch what they claim to (WP-00 acceptance)
