@@ -1,0 +1,69 @@
+# Thin shim — the body lives in ci/build.sh (PRD 7.1, 7.3).
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          # [VERIFY] free arm64 runners for public repos (PRD 7.3). If this job
+          # cannot get a runner, the pre-authorized fallback is a qemu
+          # cross-build on nightly only — do not silently drop the arch.
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+
+    name: build-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: extractions/setup-just@v3
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq podman skopeo
+          python3 -m pip install --quiet --break-system-packages jsonschema
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: podman login ghcr.io -u '${{ github.actor }}' -p '${{ secrets.GITHUB_TOKEN }}'
+
+      # PR images go to a throwaway pr-NNN tag; main goes to :testing. Nothing
+      # here ever writes :stable — that is the weekly promote gate's job (7.5).
+      - name: Compute push tag
+        id: tag
+        run: |
+          image="$(python3 -c "import json;d=json.load(open('os/rootfs/usr/share/meridian/branding.json'));print(d['registry']['namespace']+'/'+d['registry']['image'])")"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "tag=${image}:pr-${{ github.event.number }}-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${image}:testing-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        run: bash ci/build.sh ${{ matrix.arch }}
+
+      - name: Push
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: bash ci/build.sh ${{ matrix.arch }} --push '${{ steps.tag.outputs.tag }}'
+
+      - name: Verify pushed labels
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          echo "WP-01 acceptance: skopeo inspect of the PUSHED image shows our labels"
+          skopeo inspect "docker://${{ steps.tag.outputs.tag }}" \
+            | python3 -c 'import json,sys; L=json.load(sys.stdin)["Labels"]; [print(f"  {k}={v}") for k,v in sorted(L.items()) if k.startswith(("org.opencontainers.image.","org.meridian."))]'

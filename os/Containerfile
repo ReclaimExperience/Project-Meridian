@@ -1,0 +1,70 @@
+# THE OS (ADR-001). The entire filesystem of this operating system is defined
+# by this build. There is no post-install script, no first-boot mutation, no
+# "run this to finish setup" — if it is not here, it is not in the OS.
+#
+# ADR-002 base selection is decided by os/scripts/build/verify-base.sh, whose
+# committed output lives beside it. As of that run the ublue Plasma base is
+# amd64-only, so ADR-002's pre-authorized split base applies:
+#
+#   x86_64  (user-facing)  ghcr.io/ublue-os/kinoite-main       — full driver/codec stack
+#   aarch64 (dev loop)     quay.io/fedora/fedora-kinoite       — ADR-013, not a shipping target
+#
+# One Containerfile, ARG-switched. `just build` passes the right base per arch.
+
+ARG BASE_IMAGE=ghcr.io/ublue-os/kinoite-main:44
+
+FROM ${BASE_IMAGE}
+
+# Re-declared: an ARG before FROM is out of scope in the build stage.
+ARG BASE_IMAGE
+ARG MERIDIAN_VERSION=0.0.0-dev
+# Brand-derived label values. `just build` reads these out of branding.json and
+# passes them in, so no product name is hardcoded here (PRD 6.5).
+ARG BRAND_NAME
+ARG BRAND_TAGLINE
+ARG BRAND_SOURCE_URL
+ARG MERIDIAN_CHANNEL=testing
+ARG BUILD_DATE=unknown
+ARG GIT_SHA=unknown
+
+# WP-01 ships branding and labels only. Package curation is WP-02's, theming is
+# WP-05's. Adding either here is forbidden by this WP.
+
+# The tree under rootfs/ mirrors the image tree exactly, so the final location of
+# any file is readable from its path in git (PRD 6.2 — no inline writes here).
+COPY rootfs/ /
+
+COPY scripts/build/ /tmp/build/
+COPY packages.yml /tmp/build/packages.yml
+
+# os-release is generated from branding.json, never hand-written, so the WP-26
+# rename stays a one-file change (PRD 6.5).
+RUN /tmp/build/gen-os-release.sh \
+        --branding /usr/share/meridian/branding.json \
+        --version "${MERIDIAN_VERSION}" \
+        --channel "${MERIDIAN_CHANNEL}" \
+        --base "${BASE_IMAGE}"
+
+# Applies os/packages.yml. Empty at WP-01 — this wires the mechanism so WP-02
+# only edits data, never build logic.
+RUN /tmp/build/apply-packages.sh /tmp/build/packages.yml
+
+RUN rm -rf /tmp/build \
+ && ostree container commit
+
+# `bootc container lint` catches the classic image-mode mistakes (files in /var
+# that should be tmpfiles, a non-empty /boot, duplicate /etc state). It is cheap
+# and it fails the build rather than the user's machine.
+RUN bootc container lint
+
+LABEL org.opencontainers.image.title="${BRAND_NAME}"
+LABEL org.opencontainers.image.description="${BRAND_TAGLINE}"
+LABEL org.opencontainers.image.version="${MERIDIAN_VERSION}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
+LABEL org.opencontainers.image.source="${BRAND_SOURCE_URL}"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.base.name="${BASE_IMAGE}"
+LABEL org.meridian.channel="${MERIDIAN_CHANNEL}"
+LABEL org.meridian.prd="docs/PRD.md@1.0"
+LABEL containers.bootc="1"
