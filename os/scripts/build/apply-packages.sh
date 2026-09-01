@@ -77,6 +77,8 @@ for lineno, raw in enumerate(open(path), 1):
         if inline:
             if inline.startswith(("&", "*")):
                 die(lineno, raw, "YAML anchors and aliases are not supported")
+            if inline.startswith("!"):
+                die(lineno, raw, "YAML tags are not supported")
             if inline.startswith("{"):
                 die(lineno, raw, "flow mappings are not supported")
             if inline.startswith("["):
@@ -97,8 +99,16 @@ for lineno, raw in enumerate(open(path), 1):
             die(lineno, raw, "list item before any key")
         if capturing:
             value = m.group("value").strip()
-            if value.startswith(("&", "*", "{", "[")):
-                die(lineno, raw, "list items must be plain scalars")
+            if value.startswith(("&", "*", "{", "[", "!")):
+                die(lineno, raw, "list items must be plain scalars "
+                                 "(no anchors, aliases, tags, or nested collections)")
+            # A double-quoted scalar containing a backslash carries escapes that
+            # PyYAML decodes and this parser does not: "haruna\x2Dextra" is
+            # 'haruna-extra' to YAML but stays literal here. For a unit name that
+            # is silent breakage — `systemctl mask` accepts any string.
+            if "\\" in value:
+                die(lineno, raw, "backslash escapes are not supported; "
+                                 "write the value literally")
             items.append(value.strip("'\""))
         continue
 
@@ -109,19 +119,53 @@ if items:
 PY
 }
 
-mapfile_compat() {  # bash 3.2 on the Mac has no mapfile; CI has bash 5.
-    local -n _dest="$1"; shift
-    _dest=()
-    local line
-    while IFS= read -r line; do
-        if [[ -n "$line" ]]; then _dest+=("$line"); fi
-    done < <("$@")
+# Read one key, or abort the whole build.
+#
+# The previous version piped the parser through `< <(...)`, which DISCARDS the
+# command's exit status: every strict rejection printed its error to stderr and
+# then became an empty list, and the script exited 0. That was worse than having
+# no strict parser at all — one ambiguous line emptied all four lists, so
+# packages were silently not installed, removals silently not performed, and
+# masks silently not applied, with a green build.
+#
+# A simple assignment DOES carry the command's status, so `|| ` is reached.
+# Written without `local -n` so it also runs on bash 3.2 (the Mac dev loop).
+parse_key() {
+    local key="$1" raw
+    if ! raw="$(read_list "$key")"; then
+        echo "apply-packages: refusing to continue — the parser rejected" >&2
+        echo "                ${MANIFEST} while reading '${key}' (see above)." >&2
+        exit 2
+    fi
+    printf '%s' "$raw"
 }
 
-mapfile_compat ADD     read_list add
-mapfile_compat REMOVE  read_list remove
-mapfile_compat MASK    read_list systemd.mask
-mapfile_compat DISABLE read_list systemd.disable
+# Split captured text into ITEMS. A here-string keeps the loop in this shell, so
+# nothing here can swallow a failure in a subshell either.
+ITEMS=()
+to_items() {
+    ITEMS=()
+    local line
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then ITEMS+=("$line"); fi
+    done <<< "${1:-}"
+}
+
+command -v python3 >/dev/null || {
+    echo "apply-packages: python3 is required to read ${MANIFEST}." >&2
+    echo "                Refusing to continue: without it every list would" >&2
+    echo "                silently read as empty." >&2
+    exit 2
+}
+
+ADD_RAW="$(parse_key add)"
+to_items "$ADD_RAW";     ADD=("${ITEMS[@]+"${ITEMS[@]}"}")
+REMOVE_RAW="$(parse_key remove)"
+to_items "$REMOVE_RAW";  REMOVE=("${ITEMS[@]+"${ITEMS[@]}"}")
+MASK_RAW="$(parse_key systemd.mask)"
+to_items "$MASK_RAW";    MASK=("${ITEMS[@]+"${ITEMS[@]}"}")
+DISABLE_RAW="$(parse_key systemd.disable)"
+to_items "$DISABLE_RAW"; DISABLE=("${ITEMS[@]+"${ITEMS[@]}"}")
 
 echo "apply-packages: add=${#ADD[@]} remove=${#REMOVE[@]} mask=${#MASK[@]} disable=${#DISABLE[@]}"
 

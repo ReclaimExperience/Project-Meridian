@@ -62,5 +62,19 @@ jobs:
 
       # One invocation per job: it builds, then pushes and verifies the pushed
       # labels. Running the script twice rebuilt the whole image.
+      #
+      # Fork PRs get no GHCR credentials, so they build without pushing. ADR-014
+      # makes this repo public, so fork PRs are a real path, not a hypothetical —
+      # they must not fail on a push they were never able to perform.
       - name: Build and push
-        run: bash ci/build.sh ${{ matrix.arch }} --push '${{ steps.tag.outputs.tag }}'
+        env:
+          CAN_PUSH: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$CAN_PUSH" = "true" ]; then
+            bash ci/build.sh ${{ matrix.arch }} --push '${{ steps.tag.outputs.tag }}'
+          else
+            echo "Fork pull request: building without pushing (no registry credentials)."
+            echo "The pushed-label check therefore does not run for this PR."
+            bash ci/build.sh ${{ matrix.arch }}
+          fi

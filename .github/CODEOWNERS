@@ -26,7 +26,7 @@
 # The pipeline that reaches users' machines, and image signing policy (ADR-014).
 /ci/                                        @ReclaimExperience/owners
 /.github/workflows/                         @ReclaimExperience/owners
-/os/rootfs/etc/containers/policy.json       @ReclaimExperience/owners
+/os/rootfs/etc/containers/policy.json       @ReclaimExperience/owners  # planned: WP-04
 
 # The gates themselves. Rule R-E: budgets are laws; you never edit the gate.
 /tests/lint/                @ReclaimExperience/owners

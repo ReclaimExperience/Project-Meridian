@@ -37,7 +37,7 @@ def recipes() -> list[tuple[str, int, str]]:
     found, i = [], 0
     while i < len(lines):
         # A recipe header sits at column 0 and ends in ':' or has parameters.
-        header = re.match(r"^([a-z][a-z0-9-]*)(?: [^:]*)?:(?!=)", lines[i])
+        header = re.match(r"^([a-z_][a-z0-9_-]*)(?: [^:]*)?:(?!=)", lines[i])
         if header and i + 1 < len(lines) and lines[i + 1].strip().startswith("#!"):
             name, start = header.group(1), i + 2
             body, j = [], i + 1
@@ -57,6 +57,23 @@ def main() -> int:
     if not (found := recipes()):
         print(
             "justfile-shell: no shebang recipes found — did the Justfile format change?"
+        )
+        return 1
+
+    # Completeness check: every shebang in the Justfile must belong to a recipe
+    # we actually extracted. Without this, a header the regex fails to match
+    # silently drops that recipe's shell from the lint — which is exactly how
+    # `_todo` went unlinted while this script reported "all clean".
+    shebangs = sum(
+        1 for line in JUSTFILE.read_text().split("\n") if line.strip().startswith("#!")
+    )
+    if shebangs != len(found):
+        print(
+            f"justfile-shell: the Justfile has {shebangs} shebang line(s) but only "
+            f"{len(found)} recipe(s) were extracted — some recipe's shell is going "
+            f"unlinted.\n"
+            f"    Extracted: {[name for name, _, _ in found]}\n"
+            f"    Fix the header pattern in this script; do not ignore the gap."
         )
         return 1
 

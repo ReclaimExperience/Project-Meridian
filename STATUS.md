@@ -224,8 +224,8 @@ recorded here because several are traps a later WP could re-enter.
 
 | ID | Finding | Fix |
 |---|---|---|
-| B-1 | The restricted YAML parser silently disagreed with PyYAML on **7 schema-valid inputs** — multi-line flow sequences, quoted keys, anchors/aliases, duplicate keys (parser returned the *union*, PyYAML keeps the last), odd indentation, space before colon, flow mappings. A wrong package list would have reached `dnf` with a green build. | Parser is now strict and hard-errors on all seven instead of returning `[]`. All seven are permanent cases in `tests/lint/test_packages_parser.py`. |
-| B-2 | The `usr/etc` → `etc` move orphaned two CODEOWNERS rules — **polkit and the image signing policy**, the two most security-sensitive surfaces — so R-H would have silently stopped gating them. | Paths repointed; `tests/lint/codeowners.sh` now fails any rule whose parent directory cannot exist. |
+| B-1 | The restricted YAML parser silently disagreed with PyYAML on **7 schema-valid inputs** — multi-line flow sequences, quoted keys, anchors/aliases, duplicate keys (parser returned the *union*, PyYAML keeps the last), odd indentation, space before colon, flow mappings. A wrong package list would have reached `dnf` with a green build. | Parser made strict. **First attempt did not fix the blocker — see N-1 below.** Now genuinely fixed and proven against the shipped script. |
+| B-2 | The `usr/etc` → `etc` move orphaned two CODEOWNERS rules — **polkit and the image signing policy**, the two most security-sensitive surfaces — so R-H would have silently stopped gating them. | Paths repointed. **The lint written to catch this did not catch it — see N-2 below.** Now rewritten and proven against the original stale rules. |
 | M-3 | `ci/build.sh` regenerated `os/base-images.env` on every CI run. A transient registry error makes `verify-base.sh` emit `DECISION=fedora-fallback` **and exit 0**, so CI could have built the user-facing x86_64 image on a base with no driver stack and pushed it to `:testing`. Green build, wrong OS. | CI is compare-only: it fails if the live decision differs from the committed record. `arches_of()` retries before concluding an image is missing. `just verify-base` writes atomically so a failure no longer truncates its own evidence. |
 | M-4 | "Boots to the SDDM greeter" overclaimed what the screenshot shows. | Corrected above; the acceptance item is marked NOT MET. |
 | M-5 | `just vm-run` had two silent aborts (`find` under `pipefail` made its own error branch unreachable; `brew --prefix` failure exited 127 with no output on any non-Homebrew machine) and passed **no UEFI firmware for x86_64** despite ADR-013. | Firmware is resolved across macOS/Fedora/Debian paths with a clear error listing what it looked for; both aborts fixed and reproduced as fixed. |
@@ -241,3 +241,26 @@ bash 4.3, so the script cannot be exercised on the Mac's bash 3.2 — it only ev
 runs inside the Fedora container); F-13 (`just test-lint` writes to the git index);
 F-14's note that `.gitkeep` exclusion means `catalog/`/`compat/` directories will
 not exist in the image, which WP-13/WP-15 must create rather than assume.
+
+## Second review round — my own fixes were defective
+
+The re-verification review returned **CHANGES REQUESTED** again. Two of the
+blocker "fixes" did not fix their blockers. Recorded in full because the pattern
+matters more than the individual bugs: **a fix is not a fix until it is proven
+against the shipped artifact.**
+
+| ID | What was actually wrong | Fix, and how it is now proven |
+|---|---|---|
+| N-1 (blocker) | The parser was made strict; the **call site threw its exit status away**. `mapfile_compat` read it through `< <(cmd)`, which does not propagate status, so every strict rejection printed an error and became an empty list — exit 0. This was **worse than the original bug**: one ambiguous line emptied all four lists, so packages were silently not installed, removals not performed, masks not applied, build green. A missing `python3` did the same. | Reads now use a plain assignment (which *does* carry status) and abort the build. `python3` presence is checked explicitly. Proven by reintroducing the exact bug and watching the test go red. |
+| N-2 (major) | The new `codeowners.sh` walked *up* until it found any existing ancestor, so `/os/rootfs/usr/etc/polkit-1/` passed because `os/rootfs/usr/` exists. It reported "clean" on the exact rules B-2 was about. | Now requires the **immediate** parent to exist, or an explicit `# planned: WP-NN` marker. Proven by re-injecting the original stale rules: exit 1. |
+| N-3 (major) | YAML tags (`!!str foo.service`) and backslash escapes in double-quoted scalars (`"haruna\x2Dextra"`) were accepted and mis-decoded, exit 0. Dangerous for unit names: `systemctl mask` accepts any string, so a mis-decoded name masks nothing, silently. | Both rejected. |
+| N-4 (medium) | Merging the Build and Push steps dropped the fork-PR guard while still always passing `--push`, so a fork PR would build and then fail on a push it had no credentials for. ADR-014 makes fork PRs a real path. | Push is conditional; fork PRs build and say why they skip the push. |
+| N-5 (minor) | The Justfile shell lint's header regex skipped `_`-prefixed recipes, so `_todo`'s body was unlinted while the lint said "clean". | Regex widened, plus a completeness check that fails when the shebang count exceeds the extracted-recipe count. Proven by narrowing the regex and watching it fire. |
+| N-6 (minor) | The parser test extracted the heredoc and tested it **standalone** — a code path the shipped script never took. This is what hid N-1 for a whole round. | Rewritten to drive the real `apply-packages.sh` with `dnf`/`systemctl` stubs that record their arguments, comparing actual actions against PyYAML, and asserting rejected manifests produce **no side effects at all**. |
+| N-7 (nit) | `mv` from `mktemp` left the committed evidence file mode 0600. | `chmod 644`. |
+
+**The lesson, for every later WP:** three of my edits in this round silently
+no-opped because a string replace did not match reformatted source, and the
+"fixed" claim survived until something re-read the file. Verify that an edit
+landed, and verify a fix against the artifact that ships — not against an
+extracted copy of it.
