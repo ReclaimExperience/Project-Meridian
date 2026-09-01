@@ -251,12 +251,48 @@ vm-image arch="x86_64":
     # the Mac dev loop (PRD 7.2) runs a rootless podman machine.
     graphroot="$(podman info --format '{{{{ .Store.GraphRoot }}')"
 
+    # Two customizations, both DISK-IMAGE ONLY, so `just vm-run` reaches the
+    # actual SDDM login greeter:
+    #
+    #  1. a local user — SDDM has nobody to offer without one;
+    #  2. /etc/plasma-setup-done — Plasma ships its own OOBE wizard as
+    #     plasma-setup.service, which runs `Before=display-manager.service` and
+    #     so preempts SDDM entirely until that flag exists. An account alone is
+    #     NOT enough; this was why the first WP-01 screenshot showed a setup
+    #     screen rather than a greeter.
+    #
+    # FOR WP-02 AND WP-14: the shipped image still carries plasma-setup and
+    # plasma-welcome. Left alone, a real user meets Plasma's OOBE before ours
+    # (PRD 5.8) — two wizards, neither ours first. Suppressing Plasma's belongs
+    # to package curation and to our own Welcome, not here.
+    #
+    # This touches only the qcow2 built here. The container image we push is
+    # untouched, so PRD 7.4's rule — no published image carries test
+    # credentials — holds. The password is generated per build and printed once;
+    # nothing is committed. WP-03 replaces this with its transient boot-time
+    # credential injection.
+    devpass="$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')"
+    conf="$(mktemp -d)/config.toml"
+    cat > "$conf" <<TOML
+    [[customizations.user]]
+    name = "mtest"
+    password = "${devpass}"
+    groups = ["wheel"]
+
+    [[customizations.files]]
+    path = "/etc/plasma-setup-done"
+    data = "dev disk image only - see Justfile\n"
+    TOML
+    sed -i'' -e 's/^    //' "$conf"
+
     echo "building qcow2 from ${tag}"
+    echo "  dev login: mtest / ${devpass}   (this disk image only; never published)"
     podman run --rm --privileged \
         --platform "${platform}" \
         --security-opt label=type:unconfined_t \
         -v "$(pwd)/build:/output" \
         -v "${graphroot}:/var/lib/containers/storage" \
+        -v "${conf}:/config.toml:ro" \
         quay.io/centos-bootc/bootc-image-builder:latest \
         --type qcow2 \
         --local "${tag}"

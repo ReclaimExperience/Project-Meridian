@@ -66,6 +66,27 @@ jobs:
       # Fork PRs get no GHCR credentials, so they build without pushing. ADR-014
       # makes this repo public, so fork PRs are a real path, not a hypothetical —
       # they must not fail on a push they were never able to perform.
+      # WP-01 stopgap: boot the image once and photograph the greeter, because
+      # its acceptance asks for a manual screenshot and the x86_64 disk image
+      # cannot be built on the owner's Apple Silicon machine at all. Also
+      # answers the PRD 7.3 [VERIFY] on /dev/kvm. WP-03 deletes this.
+      - name: Boot and photograph the greeter
+        if: matrix.arch == 'x86_64'
+        run: |
+          sudo apt-get install -y -qq qemu-system-x86 ovmf
+          python3 -m pip install --quiet --break-system-packages pillow
+          bash ci/boot-screenshot.sh x86_64
+
+      - name: Upload boot evidence
+        if: matrix.arch == 'x86_64' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wp-01-boot-evidence-x86_64
+          path: |
+            build/evidence/greeter-x86_64.png
+            build/evidence/serial-x86_64.txt
+          if-no-files-found: warn
+
       - name: Build and push
         env:
           CAN_PUSH: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
