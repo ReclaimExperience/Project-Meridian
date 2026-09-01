@@ -202,10 +202,34 @@ vm-image arch="x86_64":
     fi
 
     case "{{ arch }}" in
-        x86_64)  platform=linux/amd64 ;;
-        aarch64) platform=linux/arm64 ;;
+        x86_64)  platform=linux/amd64; want=x86_64 ;;
+        aarch64) platform=linux/arm64; want=aarch64 ;;
         *) echo "just vm-image: unknown arch '{{ arch }}'"; exit 1 ;;
     esac
+
+    # bootc-image-builder runs podman inside itself. Under qemu emulation that
+    # nested podman cannot allocate its locks:
+    #
+    #   failed to open 2048 locks in /libpod_lock: numerical result out of range
+    #
+    # Confirmed on an Apple Silicon host building x86_64, with and without
+    # --ipc=host. `just build {{ arch }}` cross-builds fine — it is only the
+    # DISK image step that cannot cross-build. PRD 7.2 already makes CI the
+    # authoritative x86_64 loop; this is the concrete reason.
+    host="$(uname -m)"
+    [ "$host" = "arm64" ] && host=aarch64
+    if [ "$want" != "$host" ] && [ "${MERIDIAN_FORCE_CROSS_VM_IMAGE:-0}" != "1" ]; then
+        echo "just vm-image: cannot build a ${want} disk image on a ${host} host."
+        echo
+        echo "  bootc-image-builder runs podman inside itself, and the nested"
+        echo "  podman fails under emulation with:"
+        echo "    failed to open 2048 locks in /libpod_lock: numerical result out of range"
+        echo
+        echo "  'just build {{ arch }}' does work — only this disk-image step cannot"
+        echo "  cross-build. Use CI for ${want} disk images (PRD 7.2), or set"
+        echo "  MERIDIAN_FORCE_CROSS_VM_IMAGE=1 to try anyway."
+        exit 1
+    fi
 
     # bootc-image-builder refuses to run rootless. On the Mac dev loop that means
     # the podman machine has to be rootful; its message alone does not say how.

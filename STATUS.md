@@ -159,6 +159,15 @@ is re-checked after WP-02 removes `plasma-welcome` (PRD 3.2).
 
 **NOT yet verified — this WP is not done:**
 
+- **x86_64 boot.** The x86_64 image itself now builds locally and inspects clean
+  (see below), but it has never been booted. `just vm-image x86_64` **cannot**
+  run on the Apple Silicon dev machine: bootc-image-builder runs podman inside
+  itself and the nested podman fails under emulation with `failed to open 2048
+  locks in /libpod_lock: numerical result out of range`, with and without
+  `--ipc=host`. `just build` cross-builds fine; only the DISK image step cannot.
+  The recipe now says so instead of failing obscurely. PRD 7.2 already makes CI
+  the authoritative x86_64 loop — this is the concrete reason. Booting it needs
+  WP-03's harness on an x86_64 runner.
 - **SDDM login greeter** — see the correction above. A graphical session starts;
   the greeter has not been shown.
 - `just vm-run x86_64` has never been executed. Until this review it also passed
@@ -347,3 +356,31 @@ block branch guarded, flow branch not. Round 4: git for the file list, hand-roll
 regex for the pattern semantics. Before claiming a check is authoritative, name
 the authority and confirm it answers the **whole** question, not the part that
 was convenient to delegate.
+
+## x86_64 image built and inspected locally — 2026-09-01
+
+Both halves of the ADR-002 split base now exist side by side and agree everywhere
+except the base itself, which is the intent:
+
+| | aarch64 (dev loop) | x86_64 (user-facing) |
+|---|---|---|
+| base | `quay.io/fedora/fedora-kinoite:44` | `ghcr.io/ublue-os/kinoite-main:44` |
+| image size | 7.41 GB | **9.14 GB** |
+| `bootc container lint` | 13 passed | 13 passed |
+| `/usr/etc` | absent | absent |
+| repo bookkeeping shipped | 0 files | 0 files |
+| `root-fs-type` | btrfs | btrfs |
+| os-release NAME / ID / VERSION_ID | `Meridian OS` / `meridian` / `1.0` | identical |
+
+The ~1.7 GB difference is ublue's driver and codec stack — the thing ADR-002
+selects that base for — so the split is doing what it was chosen to do.
+
+**Known limitation for WP-03 and WP-16:** a disk image (and therefore an ISO)
+can only be built for the host's own architecture on this machine. Plan the
+x86_64 harness and ISO work around CI runners, not the Mac dev loop.
+
+**Note on GHCR:** the packages are private even though the repo is public, and a
+`repo`-scoped token cannot read them. This x86_64 image had to be rebuilt locally
+under emulation despite CI having already built and pushed exactly it. Making the
+package public would let later WPs pull CI artifacts instead of re-emulating
+them.
