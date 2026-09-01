@@ -20,7 +20,9 @@ df -h / /mnt 2>/dev/null | sed 's/^/  /'
 # them is not fatal — they are a bonus, not the mechanism.
 for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
            /usr/local/share/boost /opt/hostedtoolcache/CodeQL; do
-    [[ -e "$dir" ]] && sudo rm -rf "$dir" || true
+    if [[ -e "$dir" ]]; then
+        sudo rm -rf "$dir" || echo "  (could not remove $dir — continuing)"
+    fi
 done
 
 # The real fix: put the container store on the big volume. podman runs rootless
