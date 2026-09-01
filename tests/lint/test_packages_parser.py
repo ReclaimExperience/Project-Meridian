@@ -98,6 +98,11 @@ MUST_REJECT = {
     "missing add key": "version: 1\nremove: []\n",
     "typo'd keys": "version: 1\nadds:\n  - alpha\nremoves:\n  - beta\n",
     "empty file": "",
+    # Fail-open cases: YAML a real reader refuses, or structure that silently
+    # produced an empty list. Found in round four.
+    "multiple documents": "version: 1\nadd: [alpha]\n---\nremove: []\n",
+    "tab indentation": "version: 1\nadd:\n\t- alpha\nremove: []\n",
+    "mapping under a list key": "version: 1\nadd:\n  sub:\n    - evil\nremove: []\n",
 }
 
 STUB = """#!/bin/sh
@@ -189,6 +194,9 @@ def main() -> int:
         "typo'd keys",
         "empty file",
         "flow whitespace in element",
+        "multiple documents",
+        "tab indentation",
+        "mapping under a list key",
     }
     for name, text in MUST_REJECT.items():
         if name in STRUCTURAL:

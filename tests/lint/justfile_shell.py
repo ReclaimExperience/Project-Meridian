@@ -54,12 +54,11 @@ class Recipe:
         self.raw_lines = raw_lines
 
 
-def parse_recipes() -> tuple[list[Recipe], int]:
-    """Return (recipes, header_count). Bodies are de-indented by the indent the
-    body actually uses, not an assumed one."""
+def parse_recipes() -> list[Recipe]:
+    """Bodies are de-indented by the indent the body actually uses, not an
+    assumed one. Completeness is verified by main() against `just` itself."""
     lines = JUSTFILE.read_text().split("\n")
     recipes: list[Recipe] = []
-    headers = 0
     i = 0
 
     while i < len(lines):
@@ -81,7 +80,6 @@ def parse_recipes() -> tuple[list[Recipe], int]:
             i = j if j > i else i + 1
             continue
 
-        headers += 1
         indent = re.match(r"^[ \t]*", non_blank[0]).group(0)
         body_lines = [
             ln[len(indent) :] if ln.startswith(indent) else ln.lstrip() for ln in block
@@ -100,7 +98,7 @@ def parse_recipes() -> tuple[list[Recipe], int]:
         )
         i = j
 
-    return recipes, headers
+    return recipes
 
 
 def just_recipe_names() -> set[str] | None:
@@ -121,7 +119,7 @@ def just_recipe_names() -> set[str] | None:
 
 
 def main() -> int:
-    recipes, headers = parse_recipes()
+    recipes = parse_recipes()
     if not recipes:
         print("justfile-shell: no recipes found — did the Justfile format change?")
         return 1
@@ -130,42 +128,40 @@ def main() -> int:
     # parsing. Counting our own headers only proves the parser agrees with
     # itself: an earlier version silently dropped every recipe whose parameter
     # had a default value, and the count matched perfectly the whole time.
+    # Completeness, answered by `just` itself rather than by our own parsing.
+    # Counting our own headers only proved the parser agreed with itself: an
+    # earlier version silently dropped every recipe whose parameter had a
+    # default value, and the count matched perfectly the whole time.
+    #
+    # A missing or broken `just` is an ERROR, not a fallback. The previous
+    # fallback compared `headers` to `len(recipes)`, which are incremented on
+    # adjacent lines and so can never differ — a check that reads like a
+    # safety net and is a tautology.
     declared = just_recipe_names()
-    if declared is not None:
-        missed = declared - {r.name for r in recipes}
-        if missed:
-            print(
-                f"justfile-shell: `just` declares {len(declared)} recipe(s) but "
-                f"{len(missed)} were not extracted, so their shell is unlinted:"
-            )
-            for name in sorted(missed):
-                print(f"    {name}")
-            print("    Fix the header pattern in this script; do not ignore the gap.")
-            return 1
-    elif headers != len(recipes):
+    if declared is None:
         print(
-            f"justfile-shell: found {headers} recipe header(s) but extracted "
-            f"{len(recipes)} — some recipe's shell is going unlinted."
+            "justfile-shell: could not ask `just` which recipes exist.\n"
+            "    Refusing to report a result: without that list this check cannot\n"
+            "    tell whether a recipe's shell is being silently skipped, which is\n"
+            "    the entire point of it. Install `just` (see ci/tool-versions.env)."
         )
+        return 1
+
+    missed = declared - {r.name for r in recipes}
+    if missed:
+        print(
+            f"justfile-shell: `just` declares {len(declared)} recipe(s) but "
+            f"{len(missed)} were not extracted, so their shell is unlinted:"
+        )
+        for name in sorted(missed):
+            print(f"    {name}")
+        print("    Fix the header pattern in this script; do not ignore the gap.")
         return 1
 
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:
         for recipe in recipes:
             extracted = [ln for ln in recipe.body.split("\n") if ln.strip()]
-            # An empty or truncated body means the de-indent went wrong and the
-            # recipe is being silently skipped. That is the failure this lint
-            # exists to prevent, so it must be an error, never a quiet "ok".
-            if len(extracted) < recipe.raw_lines:
-                print(
-                    f"  FAIL  recipe '{recipe.name}' (Justfile line {recipe.start}): "
-                    f"extracted {len(extracted)} of {recipe.raw_lines} body line(s)."
-                )
-                print(
-                    "      The de-indent lost lines, so this recipe is not being linted."
-                )
-                failures += 1
-                continue
 
             source = INTERP.sub(PLACEHOLDER, recipe.body)
             stub = "JUSTVAR=x\n" if INTERP.search(recipe.body) else ""

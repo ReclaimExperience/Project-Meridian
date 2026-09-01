@@ -99,9 +99,20 @@ def validate_scalar(lineno, raw, value):
 
 items, stack, capturing, seen = [], [], False, set()
 
+LIST_KEYS = ("add", "remove", "mask", "disable")
+
 for lineno, source in enumerate(open(path), 1):
+    # Document markers are NOT harmless: skipping them silently merges a
+    # multi-document stream into one key space, where PyYAML would refuse the
+    # file outright. `version: 1 / add: [alpha] / --- / remove: []` would have
+    # installed alpha.
     if source.strip() in ("---", "..."):
-        continue                              # document markers are harmless
+        die(lineno, source, "multiple YAML documents are not supported; "
+                            "packages.yml must be a single document")
+    if "\t" in source:
+        # PyYAML rejects tabs used for indentation outright. Accepting them
+        # here would mean parsing a file no real YAML reader would accept.
+        die(lineno, source, "tabs are not valid YAML indentation; use spaces")
     line = strip_comment(source).rstrip()
     if not line.strip():
         continue
@@ -117,6 +128,10 @@ for lineno, source in enumerate(open(path), 1):
         stack = stack[:depth] + [m.group("key")]
 
         parent = tuple(stack[:-1])
+        if parent and parent[-1] in LIST_KEYS:
+            # A mapping nested under a list key was structurally accepted and
+            # silently yielded an empty list.
+            die(lineno, source, f"'{parent[-1]}' takes a list of names, not a mapping")
         if parent in KNOWN and stack[-1] not in KNOWN[parent]:
             die(lineno, source, f"unknown key '{'.'.join(stack)}'")
         if tuple(stack) in seen:

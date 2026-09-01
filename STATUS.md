@@ -265,30 +265,31 @@ no-opped because a string replace did not match reformatted source, and the
 landed, and verify a fix against the artifact that ships — not against an
 extracted copy of it.
 
-## Repository governance — armed 2026-09-01, one step outstanding
+## Repository governance — ARMED 2026-09-01
 
-The repo is now **public** (ADR-014 satisfied), which also made branch protection
-available on the free plan. `main` now requires `lint`, `build-x86_64` and
-`build-aarch64` to pass, plus one code-owner approval, with stale reviews
-dismissed, linear history enforced, and force pushes and deletions blocked.
-Admins may bypass, deliberately: GitHub forbids self-approval, so full
-enforcement would deadlock a solo owner's own PRs.
+All three preconditions for rule R-H are satisfied and independently verified:
 
-**Still unarmed:** the `@ReclaimExperience/owners` team has no write access to
-this repo, so all 13 CODEOWNERS rules fail to resolve. GitHub's
-`codeowners/errors` endpoint reports every one as "Unknown owner". **Rule R-H is
-therefore still a convention, not a gate** — the review requirement is live, but
-no owner can satisfy it, so merges rely on the admin bypass. Granting the team
-needs org-admin rights; the commands are in `.github/CODEOWNERS`.
+- The repo is **public** (ADR-014), which also made branch protection available
+  on the free plan.
+- `main` requires `lint`, `build-x86_64` and `build-aarch64` to pass, plus one
+  code-owner approval, with stale reviews dismissed, linear history enforced,
+  and force pushes and deletions blocked. Admins may bypass, deliberately:
+  GitHub forbids self-approval, so full enforcement would deadlock a solo
+  owner's own PRs.
+- The `@ReclaimExperience/owners` team has write access, so every CODEOWNERS
+  rule resolves. `gh api 'repos/{owner}/{repo}/codeowners/errors'` returns
+  `{"errors":[]}` on `main`, `wp/00-repo-bootstrap` and `wp/01-base-image`.
 
-**Follow-up for a later WP:** add the `codeowners/errors` query to CI so an
-unresolvable owner fails the build. Deliberately not added now — it would fail
-today and block the very PRs that carry the fix, and a check wired to be
-non-blocking "for now" is how gates rot.
+The third is the fragile one and it fails **silently**: GitHub applies no review
+requirement at all for an unresolvable owner, and the file still reads like a
+gate. The lint workflow therefore asks GitHub directly on every run and fails
+the build if any rule stops resolving.
 
-Secret scan after going public: no credentials, tokens, keys or PII in tracked
-content or in any deleted file across the whole history. Commit author emails
-are visible, which is normal for a public repo.
+Note for later agents: an earlier version of this section said the opposite
+("still unarmed... R-H is a convention, not a gate"). It was left stale when
+the arming landed inside a commit whose message was about something else. If
+STATUS.md and the repository ever disagree again, the repository is the truth —
+and the stale entry is itself a defect worth fixing immediately.
 
 ## Third review round — the same mistake, one layer down
 
@@ -299,7 +300,7 @@ was verified against *a* path rather than *the* path.
 |---|---|---|
 | N-3 (blocker) | The tag/escape guards went on the **block-sequence** branch. A value can also arrive via a **flow sequence**, and the shipped `os/packages.yml` uses the flow form on all four lists — so the guards sat on the branch the real file never takes. `mask: ["baloo\x5Ffile.service"]` ran `systemctl mask baloo\x5Ffile.service`, which succeeds against a nonexistent unit: **Baloo silently not masked (ADR-016), exit 0, green build.** 25 silent divergences found. | Validation moved into one `validate_scalar()` that **both** routes call. The parser file now carries a warning that a rule added to one branch is not added. `MUST_REJECT` gained a flow variant of every defect; the suite went 9 → 19 cases. Confirmed against the shipped script in a container: exit 2. |
 | N-2 (major) | The rewritten `codeowners.sh` caught the one historical shape and essentially nothing else — a typo of a live rule, a renamed subdirectory, or a file that will never exist all passed, and it false-positived on legal globs. | Rewritten to expand each pattern against the real git index the way GitHub does, requiring ≥1 match or a `# planned: WP-NN` marker. All five shapes the reviewer listed as missed are now caught; four globs accepted, a glob matching nothing still caught. It immediately failed 3 live rules the previous version called clean — those are now honestly marked planned. |
-| N-5 (major) | The completeness check compared shebang count to extracted-recipe count and never checked the body was **non-empty**. Tab- and 2-space-indented recipes extracted as empty and were reported `ok`; non-shebang recipes were not linted at all. | Indent is derived from the body; an empty or truncated body is an error. Completeness is now checked against `just --dump --dump-format json` — `just`'s own answer — instead of against our parser agreeing with itself. **That immediately exposed a fresh regression of the same class: the header pattern excluded `=`, so `build`, `vm-image`, `vm-run` and `vm-test` were silently unlinted.** Coverage went 8 → 23 recipes. All six shapes in the reviewer's break matrix are caught. |
+| N-5 (major) | The completeness check never checked the body was **non-empty**. Tab- and 2-space-indented recipes extracted as empty and were reported `ok`; non-shebang recipes were not linted at all. | Indent is derived from the body; an empty or truncated body is an error. Completeness is now checked against `just --dump --dump-format json` — `just`'s own answer — instead of against our parser agreeing with itself. **That immediately exposed a fresh regression of the same class: the header pattern excluded `=`, so `build`, `vm-image`, `vm-run` and `vm-test` were silently unlinted.** Coverage went 8 → 23 recipes. All six shapes in the reviewer's break matrix are caught. |
 | NEW-1 (major) | The script never checked that `version`, `add` and `remove` were **present**. A typo (`adds:`) or a truncated file exited 0 having done nothing. The build path never runs the schema, so nothing else would catch it. | Required keys are enforced, unknown keys rejected, in the parser itself. |
 | NEW-2 (minor) | The lint workflow installed `jsonschema` but not `PyYAML`, which two lint scripts import — working only because the hosted image happens to ship it. | Installed explicitly. |
 | NEW-3 (minor) | The version-pin check only **warned**, so a laptop on a different shellcheck still got a green `just lint` — the exact drift the pins exist to stop. | `lint-toolchain` now fails, with `MERIDIAN_ALLOW_TOOL_DRIFT=1` as a documented, explicit escape hatch. |
@@ -314,3 +315,35 @@ exercised the same wrong path. **Completeness checks must be answered by an
 external authority** — `just --dump` for recipes, `git ls-files` for CODEOWNERS
 patterns, PyYAML for manifests, GitHub for owner resolution — never by our own
 parser agreeing with itself.
+
+## Fourth review round — no blocker; the recurrence had moved into the lints
+
+The parser held. 4,300 differential cases across four corpora, both bash
+versions, one runtime route, both value routes converging on `validate_scalar()`:
+**no schema-valid input makes the script exit 0 while acting on a package set
+differing from PyYAML.** That is the first clean negative in four rounds on the
+component that can actually break a user's machine.
+
+The recurrence was in the two lints, and in the same shape as always — an
+authority adopted for part of the question and hand-rolled for the rest.
+
+| ID | What was wrong | Fix |
+|---|---|---|
+| M2 (major) | `codeowners.py` adopted `git ls-files` as the authority for the **file list** but hand-rolled the **pattern semantics**, where the whole question lives. It anchored only on a *leading* slash; gitignore also anchors a pattern with an *interior* separator. So `rootfs/etc/` — a live privilege-boundary rule with the `/os` prefix dropped — matched two files here and **zero on GitHub**. A false negative in the lint's core purpose. | Matching is delegated to `git check-ignore`. Constructs GitHub does not support (`[a-z]` ranges, `!` negation) are rejected outright rather than guessed at, since git matches them and GitHub does not. Verified against the reviewer's disagreement table. |
+| M1 (major) | `justfile_shell.py`'s fallback for a missing `just` compared `headers` to `len(recipes)` — incremented on adjacent lines, so it **could never fire**. With `just` off PATH the completeness check silently vanished and a recipe containing `rm -rf $UNSET/*` passed. | A missing or failing `just` is now an error. The tautological counter and an unreachable truncated-body check are deleted rather than left looking like safety nets. |
+| m5 | The `# planned:` marker was matched anywhere in the line, so any comment containing the phrase excused a dead rule. | Anchored to a trailing comment; the WP number must be within WP-00..WP-26. |
+| m2 | `rule.split()[0]` truncated an escaped path at the backslash, and this repo tracks a mockup file with a space in its name. | Pattern splitting honours backslash escapes. |
+| m3 | Skipping `---`/`...` silently merged a multi-document stream into one key space; PyYAML refuses such a file outright. Tabs were likewise accepted where PyYAML errors. | Both rejected. Confirmed PyYAML raises `ComposerError` and `ScannerError` on the same inputs. |
+| m4 | A mapping nested under a list key was structurally accepted and silently yielded an empty list. | Rejected. |
+| m6 | This file said "**Still unarmed** — R-H is a convention, not a gate" while `.github/CODEOWNERS` said ARMED and CI was already checking owner resolution. The arming landed inside a commit whose message was about parser fixes, and the shared memory was left asserting the opposite. | Governance section rewritten to match reality, with a note that the repository is the truth when the two disagree. While fixing it I duplicated two sections; `markdownlint` MD024 caught that immediately, which is the gate working. |
+
+`MUST_REJECT` is now 22 cases; `justfile-shell` covers 23 recipes; `codeowners`
+delegates matching to git.
+
+**Where the pattern actually lives, after four rounds:** every recurrence has
+been the same shape — an external authority adopted for *part* of a question and
+hand-rolled for the rest. Round 2: parser strict, call site hand-rolled. Round 3:
+block branch guarded, flow branch not. Round 4: git for the file list, hand-rolled
+regex for the pattern semantics. Before claiming a check is authoritative, name
+the authority and confirm it answers the **whole** question, not the part that
+was convenient to delegate.
