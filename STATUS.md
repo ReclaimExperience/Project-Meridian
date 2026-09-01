@@ -264,3 +264,28 @@ no-opped because a string replace did not match reformatted source, and the
 "fixed" claim survived until something re-read the file. Verify that an edit
 landed, and verify a fix against the artifact that ships — not against an
 extracted copy of it.
+
+## Repository governance — armed 2026-09-01, one step outstanding
+
+The repo is now **public** (ADR-014 satisfied), which also made branch protection
+available on the free plan. `main` now requires `lint`, `build-x86_64` and
+`build-aarch64` to pass, plus one code-owner approval, with stale reviews
+dismissed, linear history enforced, and force pushes and deletions blocked.
+Admins may bypass, deliberately: GitHub forbids self-approval, so full
+enforcement would deadlock a solo owner's own PRs.
+
+**Still unarmed:** the `@ReclaimExperience/owners` team has no write access to
+this repo, so all 13 CODEOWNERS rules fail to resolve. GitHub's
+`codeowners/errors` endpoint reports every one as "Unknown owner". **Rule R-H is
+therefore still a convention, not a gate** — the review requirement is live, but
+no owner can satisfy it, so merges rely on the admin bypass. Granting the team
+needs org-admin rights; the commands are in `.github/CODEOWNERS`.
+
+**Follow-up for a later WP:** add the `codeowners/errors` query to CI so an
+unresolvable owner fails the build. Deliberately not added now — it would fail
+today and block the very PRs that carry the fix, and a check wired to be
+non-blocking "for now" is how gates rot.
+
+Secret scan after going public: no credentials, tokens, keys or PII in tracked
+content or in any deleted file across the whole history. Commit author emails
+are visible, which is normal for a public repo.

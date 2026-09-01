@@ -4,12 +4,26 @@
 # mistake is expensive or irreversible: settled architecture, what ships in the
 # image, the privilege boundary, and the pipeline that reaches users' machines.
 #
-# !! SETUP REQUIRED !!  The handle below must resolve to a real GitHub user or
-# team with write access, otherwise GitHub silently applies NO review
-# requirement and this file becomes decorative. After creating the team, verify
-# with: gh api 'repos/{owner}/{repo}/codeowners/errors'   (run inside this repo)
-# Branch protection on `main` must also have "Require review from Code Owners"
-# enabled — CODEOWNERS alone enforces nothing.
+# !! PARTIALLY ARMED — one step outstanding !!
+#
+#   [x] Repo is public, so branch protection is available (free plan).
+#   [x] Branch protection on `main`: lint + build-x86_64 + build-aarch64 must
+#       pass, code-owner review required, 1 approval, stale reviews dismissed,
+#       linear history, no force pushes or deletions. Admins may bypass.
+#   [ ] The `owners` team has NO write access to this repo, so every rule below
+#       currently fails to resolve and gates NOTHING.
+#
+# GitHub's own validator confirms it:
+#   gh api 'repos/{owner}/{repo}/codeowners/errors'
+#   -> "Unknown owner ... make sure the team @ReclaimExperience/owners exists,
+#       is publicly visible, and has write access to the repository"
+#
+# To arm it (needs org admin; a `repo`-scoped token cannot do this):
+#   gh api -X PUT 'orgs/{owner}/teams/owners/repos/{owner}/{repo}' -f permission=push
+#   gh api -X PATCH 'orgs/{owner}/teams/owners' -f privacy=closed
+# Then re-check that the errors list is empty.
+#
+# Until that is done, rule R-H is a convention, not a gate.
 
 # Settled law. Changing an ADR is an owner decision, never an agent's (PRD 0.1).
 /docs/adr/                  @ReclaimExperience/owners
