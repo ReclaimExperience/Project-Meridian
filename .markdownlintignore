@@ -1,0 +1,7 @@
+# Verbatim copies of owner-owned text. We are forbidden to edit these (PRD 0.1,
+# 14.1; the PRD and ADRs are CODEOWNERS-gated), so linting them would only ever
+# produce findings nobody is allowed to fix.
+docs/PRD.md
+docs/adr/ADR-0*.md
+CONTRIBUTING-AGENTS.md
+docs/contracts/interfaces.md

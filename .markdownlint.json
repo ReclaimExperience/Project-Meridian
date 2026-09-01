@@ -1,0 +1,21 @@
+{
+  "default": true,
+
+  "_comment_MD013": "No line-length cap: the PRD's prose and our tables run long by design.",
+  "MD013": false,
+
+  "_comment_MD024": "Repeated headings are fine across sections (e.g. 'Acceptance' per WP).",
+  "MD024": { "siblings_only": true },
+
+  "_comment_MD033": "Inline HTML is used in issue templates for reviewer guidance comments.",
+  "MD033": false,
+
+  "_comment_MD041": "Files may open with front matter or a badge line, not an h1.",
+  "MD041": false,
+
+  "_comment_MD046": "Both fenced and indented code blocks appear in copied spec text.",
+  "MD046": false,
+
+  "_comment_MD060": "Table pipe padding is pure cosmetics and produced 88 of 167 findings.",
+  "MD060": false
+}

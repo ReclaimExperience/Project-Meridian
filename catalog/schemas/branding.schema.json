@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "branding.schema.json",
+  "title": "Branding — the single source of the product name (PRD 6.5)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "shortName", "version", "urls", "registry"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$",
+            "description": "Brand id used in paths, D-Bus names, package names." },
+    "name": { "type": "string", "minLength": 1, "description": "Full product name, user-visible." },
+    "shortName": { "type": "string", "minLength": 1 },
+    "codename": { "type": "string" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" },
+    "versionCodename": { "type": "string" },
+    "tagline": { "type": "string" },
+    "urls": {
+      "type": "object", "additionalProperties": false,
+      "required": ["home", "download", "help", "source", "issues"],
+      "properties": {
+        "home": { "type": "string", "format": "uri" },
+        "download": { "type": "string", "format": "uri" },
+        "help": { "type": "string", "format": "uri" },
+        "source": { "type": "string", "format": "uri" },
+        "issues": { "type": "string", "format": "uri" }
+      }
+    },
+    "supportEmail": { "type": ["string", "null"],
+                      "description": "null until the owner provisions one (WP-25/26)." },
+    "registry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["namespace", "image", "channels"],
+      "properties": {
+        "namespace": { "type": "string" },
+        "image": { "type": "string" },
+        "channels": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      }
+    }
+  }
+}
