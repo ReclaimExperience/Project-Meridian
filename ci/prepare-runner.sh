@@ -39,15 +39,21 @@ graphroot = "${STORAGE_ROOT}/storage"
 runroot = "/run/user/$(id -u)/containers"
 CONF
 
-# bootc-image-builder refuses to run rootless, so the ROOT store needs the same
-# treatment — and root's default graphroot is on /, which cannot hold an OS image.
-sudo mkdir -p "${STORAGE_ROOT}/storage-root" /etc/containers
-sudo tee /etc/containers/storage.conf >/dev/null <<CONF
-[storage]
-driver = "overlay"
-graphroot = "${STORAGE_ROOT}/storage-root"
-runroot = "/run/containers/storage"
-CONF
+# bootc-image-builder refuses to run rootless, so the ROOT store needs space
+# too — and root's default graphroot is on /, which cannot hold an OS image.
+#
+# Do this with a BIND MOUNT rather than by relocating graphroot in
+# storage.conf. bootc-image-builder bind-mounts the host store into itself at
+# /var/lib/containers/storage, and the nested podman then compares that path
+# against the one recorded in the store's own database:
+#
+#   database static dir "/mnt/containers/storage-root/libpod" does not match
+#   our static dir "/var/lib/containers/storage/libpod"
+#
+# Keeping the canonical path and moving only the bytes underneath it avoids the
+# mismatch entirely.
+sudo mkdir -p "${STORAGE_ROOT}/storage-root" /var/lib/containers/storage
+sudo mount --bind "${STORAGE_ROOT}/storage-root" /var/lib/containers/storage
 
 echo "after:"
 df -h / /mnt 2>/dev/null | sed 's/^/  /'
