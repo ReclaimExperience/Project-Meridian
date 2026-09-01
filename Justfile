@@ -139,15 +139,109 @@ build arch="x86_64":
 
     echo
     echo "built ${tag}"
-    podman image inspect "${tag}" --format '  size: {{{{ .Size }}}} bytes' | tr -d '}'
+    podman image inspect "${tag}" --format '  size: {{{{ .Size }} bytes'
 
 # bootc-image-builder: image -> bootable qcow2
 vm-image arch="x86_64":
-    @just _todo WP-01 "vm-image {{ arch }}"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    image="$(python3 -c "import json;d=json.load(open('os/rootfs/usr/share/meridian/branding.json'));print(d['registry']['namespace']+'/'+d['registry']['image'])")"
+    tag="${image}:testing-{{ arch }}"
 
-# Boot the qcow2 under qemu (KVM/HVF/TCG autodetect)
-vm-run arch="x86_64":
-    @just _todo WP-01 "vm-run {{ arch }}"
+    if ! podman image exists "${tag}"; then
+        echo "just vm-image: ${tag} not found — run 'just build {{ arch }}' first."
+        exit 1
+    fi
+
+    case "{{ arch }}" in
+        x86_64)  platform=linux/amd64 ;;
+        aarch64) platform=linux/arm64 ;;
+        *) echo "just vm-image: unknown arch '{{ arch }}'"; exit 1 ;;
+    esac
+
+    # bootc-image-builder refuses to run rootless. On the Mac dev loop that means
+    # the podman machine has to be rootful; its message alone does not say how.
+    if [ "$(podman info --format '{{{{ .Host.Security.Rootless }}')" = "true" ]; then
+        echo "just vm-image: bootc-image-builder requires rootful podman."
+        echo
+        echo "  On macOS (PRD 7.2):"
+        echo "    podman machine stop && podman machine set --rootful && podman machine start"
+        echo "    just build {{ arch }}      # rootful storage is separate; rebuild into it"
+        echo
+        echo "  On Linux: run this target as root, or use a rootful podman socket."
+        exit 1
+    fi
+
+    mkdir -p build
+    # bootc-image-builder reads the source image straight out of the local
+    # container store, so the store has to be visible inside it. Ask podman
+    # where the store actually is rather than assuming the rootful path —
+    # the Mac dev loop (PRD 7.2) runs a rootless podman machine.
+    graphroot="$(podman info --format '{{{{ .Store.GraphRoot }}')"
+
+    echo "building qcow2 from ${tag}"
+    podman run --rm --privileged \
+        --platform "${platform}" \
+        --security-opt label=type:unconfined_t \
+        -v "$(pwd)/build:/output" \
+        -v "${graphroot}:/var/lib/containers/storage" \
+        quay.io/centos-bootc/bootc-image-builder:latest \
+        --type qcow2 \
+        --local "${tag}"
+
+    find build -name '*.qcow2' -exec ls -lh {} \;
+
+# Boot the qcow2 under qemu (HVF on Apple Silicon, KVM on Linux, else TCG). mode: gui | headless
+vm-run arch="x86_64" mode="gui":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    disk="$(find build -name '*.qcow2' | head -1)"
+    if [ -z "$disk" ]; then
+        echo "just vm-run: no qcow2 in build/ — run 'just vm-image {{ arch }}' first."
+        exit 1
+    fi
+
+    host_arch="$(uname -m)"
+    accel=tcg
+    case "$(uname -s)" in
+        Darwin) [ "{{ arch }}" = "aarch64" ] && [ "$host_arch" = "arm64" ] && accel=hvf ;;
+        Linux)  [ -w /dev/kvm ] && [ "{{ arch }}" = "$host_arch" ] && accel=kvm ;;
+    esac
+
+    common=(-m 4096 -smp 4 -drive "file=${disk},if=virtio,format=qcow2"
+            -device virtio-net-pci,netdev=n0 -netdev user,id=n0
+            -device virtio-rng-pci)
+
+    case "{{ arch }}" in
+        aarch64)
+            fw="$(brew --prefix qemu 2>/dev/null)/share/qemu/edk2-aarch64-code.fd"
+            [ -f "$fw" ] || fw=/usr/share/AAVMF/AAVMF_CODE.fd
+            bin=qemu-system-aarch64
+            args=(-M virt -cpu host -bios "$fw" -device virtio-gpu-pci
+                  -device qemu-xhci -device usb-kbd -device usb-tablet)
+            [ "$accel" = "tcg" ] && args=("${args[@]/-cpu host/-cpu cortex-a72}")
+            ;;
+        x86_64)
+            bin=qemu-system-x86_64
+            args=(-M q35 -device virtio-vga -device qemu-xhci -device usb-kbd -device usb-tablet)
+            ;;
+        *) echo "just vm-run: unknown arch '{{ arch }}'"; exit 1 ;;
+    esac
+
+    display=(-display cocoa)
+    [ "$(uname -s)" = "Linux" ] && display=(-display gtk)
+    # headless: no window, plus the three things needed to inspect a boot from a
+    # script — a serial log, a VNC surface, and a QMP socket. WP-03's harness
+    # drives exactly these; this target is what it will build on.
+    if [ "{{ mode }}" = "headless" ]; then
+        rm -f build/qmp-{{ arch }}.sock
+        display=(-display none -vnc :0
+                 -serial "file:build/serial-{{ arch }}.log"
+                 -qmp "unix:build/qmp-{{ arch }}.sock,server,nowait")
+    fi
+
+    echo "booting ${disk}  arch={{ arch }}  accel=${accel}  mode={{ mode }}"
+    exec "$bin" -accel "$accel" "${common[@]}" "${args[@]}" "${display[@]}"
 
 # Boot the installer ISO under qemu
 vm-run-iso:

@@ -26,13 +26,19 @@ done
 BASE_ID_LIKE="$(. /usr/lib/os-release 2>/dev/null && echo "${ID_LIKE:-} ${ID:-}" | xargs || echo fedora)"
 
 python3 - "$BRANDING" "$VERSION" "$CHANNEL" "$BASE" "$BASE_ID_LIKE" <<'PY' > /usr/lib/os-release
-import json, sys, shlex
+import json, re, sys
 
 branding_path, version, channel, base, id_like = sys.argv[1:6]
 b = json.load(open(branding_path))
 
 version = version or b["version"]
-version_id = version.split("-")[0]
+
+# VERSION_ID is at most major.minor. osbuild / bootc-image-builder builds an
+# internal distro name from ID + VERSION_ID and rejects more than one dot
+# ("too many dots in the version"), and the os-release convention is a
+# lower-precision version anyway: Fedora ships "44", RHEL ships "9.4".
+# The full precision lives in VERSION and IMAGE_VERSION.
+version_id = ".".join(version.split("-")[0].split(".")[:2])
 codename = b.get("versionCodename") or ""
 pretty = f'{b["name"]} {version}' + (f' ("{codename}")' if codename else "")
 urls = b["urls"]
@@ -62,16 +68,25 @@ if channel:
 if base:
     fields.append(("BASE_IMAGE", base))
 
+# os-release is machine-read by tooling that is stricter than the spec. Two
+# rules learned the hard way from bootc-image-builder ("readOSRelease: invalid
+# input"), both of which upstream Fedora already follows:
+#
+#   1. No comment lines. Some parsers do not skip them and abort on the first.
+#   2. Double quotes, not single, around anything that is not a bare token.
+#      An unquoted ANSI_COLOR like 0;38;2;0;152;192 breaks parsers on the ";".
+#
+# Do not "tidy" this by adding a provenance header. It will break image builds.
+BARE = re.compile(r"^[A-Za-z0-9._:/@+-]+$")
+
+
 def emit(key, value):
     value = str(value)
-    # os-release values need quoting only when they contain whitespace or quotes.
-    if any(ch in value for ch in ' \t"\''):
-        value = shlex.quote(value)
+    if not BARE.match(value):
+        value = '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
     print(f"{key}={value}")
 
 
-print("# Generated at image build from branding.json by gen-os-release.sh.")
-print("# Do not edit: your change will be overwritten on the next build (PRD 6.5).")
 for key, value in fields:
     if value != "":
         emit(key, value)

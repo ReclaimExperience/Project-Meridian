@@ -1,0 +1,16 @@
+# Default root filesystem for installs and for images built by
+# bootc-image-builder.
+#
+# Without this, the Fedora Kinoite base leaves /usr/lib/bootc/install/ empty and
+# bootc-image-builder fails with "missing required info: DefaultRootFs". ublue's
+# x86_64 base may set its own; ours is declared explicitly so both arches of the
+# ADR-002 split base behave identically.
+#
+# btrfs is not a new decision here — PRD WP-17 already specifies "btrfs with
+# Fedora's standard subvolume layout (root, home)", because per-subvolume
+# snapshots are what the v1.x backup feature is built on. WP-17 owns the full
+# partitioning story (LUKS, alongside-Windows resize, the advanced partitioner);
+# this file only states the default so an image can be built at all.
+
+[install]
+root-fs-type = "btrfs"

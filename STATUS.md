@@ -18,7 +18,7 @@ Status: `TODO` | `IN PROGRESS` | `BLOCKED` | `DONE` | `WAIVED`
 | WP | Title | Phase | Size | Risk | Depends | Status |
 |---|---|---|---|---|---|---|
 | WP-00 | Repository bootstrap & conventions | 0 | S | low | none | DONE |
-| WP-01 | Base image: builds, boots, publishes | 0 | M | medium (external base) | WP-00 | TODO |
+| WP-01 | Base image: builds, boots, publishes | 0 | M | medium (external base) | WP-00 | IN PROGRESS |
 | WP-02 | De-bloat & package curation | 0 | M | low | WP-01 | TODO |
 | WP-03 | VM test harness & story framework | 0 | L | medium | WP-01 (images to test) | TODO |
 | WP-04 | Update pipeline, rollback, signing | 0 | M | medium | WP-01 | TODO |
@@ -133,3 +133,62 @@ Its pre-authorized split-base applies and **no escalation is required**:
 `kinoite-main`'s tag scheme. Its recent tags are `latest` plus a legacy
 `stable-*` family last touched in 2023, though `:44` does resolve. Pin
 deliberately and record which scheme is authoritative.
+
+## WP-01 Base image: builds, boots, publishes — IN PROGRESS 2026-09-01 (agent run 1)
+
+**Delivered:** `os/Containerfile` (ARG-switched split base, branding-templated labels);
+`os/packages.yml` + schema + `apply-packages.sh`; `gen-os-release.sh`;
+`os/scripts/build/verify-base.sh` + committed output + `os/base-images.env`;
+`os/rootfs/usr/lib/bootc/install/10-meridian.toml`; `os/.containerignore`; real
+`just build` / `vm-image` / `vm-run` / `verify-base`; `ci/build.sh` +
+`.github/workflows/build.yml` (both arches).
+
+**Verified locally (aarch64, Apple Silicon, HVF):** `just build` → `just vm-image`
+→ `just vm-run` boots to the SDDM graphical greeter. 213 units OK, **zero**
+systemd unit failures. Screenshot: `docs/qa/evidence/wp-01-first-boot-aarch64.png`
+— its footer reads "Powered by Meridian OS", proving branding.json → os-release →
+greeter end to end. `bootc container lint`: 13 passed. Labels verified on the
+built image. qcow2 is 3.6 GB.
+
+**NOT yet verified — this WP is not done:**
+
+- x86_64 build has never run (CI has never run; blocked on `gh auth login`).
+- Nothing has been pushed to a registry, so the acceptance item "`skopeo inspect`
+  of the *pushed* image shows our labels" is unproven. Labels are confirmed only
+  on the locally built image.
+- Both-arch CI green: unproven.
+
+**Deviations:**
+
+1. `os/rootfs/usr/etc/` → `os/rootfs/etc/`. `bootc container lint` rejects
+   `/usr/etc` in a container image outright, so the PRD 6.1 path cannot build.
+   `ostree container commit` still turns `/etc` into the default `/etc`, so
+   ADR-001 is satisfied; only the source path changes. **WP-07, WP-10 and WP-12
+   must write image defaults to `os/rootfs/etc/`.** Verified the bases are clean,
+   so this was ours.
+2. Added `os/rootfs/usr/lib/bootc/install/10-meridian.toml` declaring
+   `root-fs-type = "btrfs"`. Both bases ship an empty `/usr/lib/bootc/install/`,
+   and bootc-image-builder fails with "missing required info: DefaultRootFs"
+   without it. btrfs is not a new decision — PRD WP-17 already specifies it.
+   WP-17 still owns the full partitioning story.
+3. `os/.containerignore` keeps `README.md` and `.gitkeep` out of the image. Repo
+   bookkeeping under `os/rootfs/` was shipping inside the OS.
+4. The Mac dev loop needs a **rootful** podman machine; bootc-image-builder
+   refuses to run rootless. `just vm-image` now says so with the exact commands.
+   Rootful storage is separate, so switching costs one rebuild.
+
+**Notes for later WPs:**
+
+- os-release is machine-read by stricter parsers than the spec. No comment lines
+  (bootc-image-builder aborts on the first one), double quotes not single, and
+  `VERSION_ID` at most `major.minor` — osbuild builds a distro name from
+  ID + VERSION_ID and rejects two dots. All three were build failures, not theory.
+- In a Justfile, `{{` escapes as `{{{{` but `}}` is not special, so a Go template
+  needs `{{{{ .Field }}` — writing `}}}}` emits four braces. Cost two debug cycles.
+- Do not pipe a build into `tail`: the pipeline exit code hides the failure.
+
+**Open threads:**
+
+- ublue `kinoite-nvidia` tag scheme still unresolved for WP-18 (see pre-flight note).
+- WP-02 should note the base ships `plasma-welcome`; it is what the first-boot
+  screenshot shows, and PRD 3.2 lists it for removal.
