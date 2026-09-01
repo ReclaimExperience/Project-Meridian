@@ -71,7 +71,7 @@ echo "::endgroup::"
 DISK="$(find build -name '*.qcow2' -print -quit 2>/dev/null || true)"
 if [[ -z "$DISK" ]]; then
     echo "no qcow2 produced by 'just vm-image ${ARCH}'"
-    ls -R build 2>/dev/null | head -20
+    find build -maxdepth 3 2>/dev/null | head -20
     exit 1
 fi
 
