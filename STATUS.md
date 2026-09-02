@@ -544,7 +544,20 @@ ADR-015 violation fails the ADR-015 gate and not an unrelated one.
 5355 and sshd. Recorded here so a red nightly is a known countdown rather than
 background noise: the day it goes green is the day that axis of WP-02 is done.
 
-**Still to deliver:** OCR text assertions, screenshot-diff with baselines and
+**Acceptance — 3 of 4 met, the fourth blocked on merge:**
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | `just vm-test smoke` green locally (aarch64) **and in CI (x86_64)** | **MET.** Local: PASSED in 25 s, HVF. CI: PASSED in 41 s under **KVM**, 244 units OK, 0 failed units, full GUI login through SDDM |
+| 2 | deliberately-broken assertion produces useful artifacts | **MET.** A tinted baseline produced `RMSE 0.0666 exceeds 0.0300` plus a three-panel diff sheet |
+| 3 | `mtest` absent from any pushed image, while harness access works on the same digest locally | **MET.** `ci/check-no-test-user.sh` passed against the **pushed** ref in CI; the same digest logs in locally, because the account exists only in the local disk image |
+| 4 | flaky-rate: smoke 10x consecutive green **in CI** | **PARTIAL.** 10/10 green locally, every pass 25 s ±1 s, 0 failures. The CI gate needs `nightly.yml` on the **default branch** — `workflow_dispatch` cannot target a feature branch — so it runs immediately after merge |
+
+`docs/testing.md` covers running suites, writing a story, re-baselining, and the
+two failure modes that have already cost time (systemd does not narrate the
+display manager to serial; a console login is not a desktop login).
+
+**Still to deliver (not acceptance-blocking):** OCR text assertions, screenshot-diff with baselines and
 masks, `tests/stories/` + `zt_template.py`, `perf`/`screens`/`security`/`privacy`
 suites, CI `vm-test` job, `docs/testing.md`, and the acceptance items — x86_64
 smoke in CI, deliberately-broken-assertion artifacts, `mtest` absent from any
