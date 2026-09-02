@@ -31,6 +31,7 @@ import re
 import time
 from pathlib import Path
 
+from harness.screen import wait_for_screen
 from harness.vm import VM
 
 BUDGETS = json.loads(
@@ -130,6 +131,9 @@ def measure(vm: VM, credentials: dict) -> dict:
 
     # --- idle RAM ------------------------------------------------------------
     vm.qmp.wake_display()
+    # See smoke: typing a password at a black screen produces a timeout that
+    # blames whatever is waited on next.
+    wait_for_screen(vm, "the greeter", keep_as=f"perf-greeter-{vm.arch}")
     _status, before = console.run("pgrep -a plasmashell || true", timeout=30)
     assert "plasmashell" not in before, (
         "plasmashell was running before the GUI login, so this measures a "
