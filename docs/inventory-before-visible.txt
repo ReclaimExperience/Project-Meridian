@@ -1,0 +1,38 @@
+# Launcher-visible desktop entries BEFORE de-bloat (WP-02)
+#
+# 34 entries. PRD 3.2 calls for ~12 visible apps. Format: owning-package|Name
+
+ark|Ark
+dolphin|Dolphin
+fcitx5-configtool|Keyboard layout viewer
+fcitx5-data|Fcitx 5
+fcitx5-data|Fcitx 5 Configuration
+filelight|Filelight
+firefox|Firefox
+firewall-config|Firewall
+htop|Htop
+kate|Kate
+kcharselect|KCharSelect
+kde-connect|KDE Connect
+kde-connect|KDE Connect Indicator
+kde-connect|KDE Connect SMS
+kde-partitionmanager|KDE Partition Manager
+kdebugsettings|KDebugSettings
+kfind|KFind
+khelpcenter|Help Center
+kinfocenter|Info Center
+kjournald|Journald Browser
+kmenuedit|Menu Editor
+konsole|Konsole
+krfb|Krfb
+kwalletmanager5|KWalletManager
+kwrite|KWrite
+nvtop|nvtop
+plasma-desktop|Emoji Selector
+plasma-discover|Discover
+plasma-drkonqi|Crashed Processes Viewer
+plasma-systemmonitor|System Monitor
+plasma-systemsettings|KDE System Settings
+plasma-systemsettings|System Settings
+plasma-welcome|Welcome Center
+spectacle|Spectacle
