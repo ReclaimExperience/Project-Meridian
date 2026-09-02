@@ -75,10 +75,15 @@ remove:
                        # offering to send a backtrace is exactly what pillar 5 says
                        # this system does not do.
 
-  - PackageKit-Qt6     # ADR-004 again: the PackageKit stack is not shipped.
-                       # Orphaned when plasma-discover went — nothing requires
-                       # it — but an unused package-management daemon is exactly
-                       # the second update path ADR-008 says must not exist.
+  # PackageKit-Qt6 is NOT here. It looks like an ADR-004 violation and is not
+  # one: the PackageKit DAEMON is absent from the base — no packagekitd, no
+  # packagekit.service, no D-Bus activation file — so what remains is a client
+  # library with nothing to talk to. ADR-004 asks that the backend not be
+  # shipped, and it is not. Removing the library anyway takes plasma-desktop,
+  # plasma-workspace and dolphin with it (86 packages); the build guard caught
+  # that. Note that `rpm -q --whatrequires PackageKit-Qt6` reports "no package
+  # requires" it, because Plasma depends on the SONAME rather than the name —
+  # a name-only check is not evidence that a removal is safe.
   - akonadi-server     # PRD 6.2 names the Akonadi/PIM stack. There is no mail,
                        # calendar or contacts app in 3.2, so this is a MySQL
                        # instance running for nothing — and idle RAM is a 1.1 GiB
