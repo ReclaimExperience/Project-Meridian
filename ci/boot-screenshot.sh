@@ -97,26 +97,49 @@ echo "::group::boot ${DISK} (accel=${ACCEL}, settle=${SETTLE}s)"
 case "$ARCH" in
     x86_64)
         BIN=qemu-system-x86_64
-        FW=$(find_firmware 'OVMF_CODE*.fd' /usr/share/OVMF /usr/share/edk2/ovmf)
         MACHINE=(-M q35 -device virtio-vga)
+        FW=$(find_firmware 'OVMF_CODE_4M.fd' /usr/share/OVMF /usr/share/edk2/ovmf)
+        [[ -n "$FW" ]] || FW=$(find_firmware 'OVMF_CODE.fd' /usr/share/OVMF /usr/share/edk2/ovmf)
         ;;
     aarch64)
         BIN=qemu-system-aarch64
-        FW=$(find_firmware 'AAVMF_CODE*.fd' /usr/share/AAVMF /usr/share/edk2/aarch64)
-        [[ -n "$FW" ]] || FW=$(find_firmware 'QEMU_EFI*.fd' /usr/share/AAVMF /usr/share/edk2/aarch64)
         MACHINE=(-M virt -cpu max -device virtio-gpu-pci)
+        FW=$(find_firmware 'AAVMF_CODE.fd' /usr/share/AAVMF /usr/share/edk2/aarch64)
+        [[ -n "$FW" ]] || FW=$(find_firmware 'QEMU_EFI.fd' /usr/share/AAVMF /usr/share/edk2/aarch64)
         ;;
     *) echo "unknown arch $ARCH"; exit 1 ;;
 esac
+
+# Derive VARS from the CODE path so the pair always matches. Globbing for VARS
+# independently can pair plain CODE with a *.ms.fd (Microsoft-keyed) VARS, and
+# ADR-013 has Secure Boot OFF for 1.0 — so never a secboot variant either.
+VARS="${FW/CODE/VARS}"
+[[ -f "$VARS" ]] || VARS=""
 if [[ -z "$FW" ]]; then
     echo "no UEFI firmware found on the runner. Searched:"
-    ls -d /usr/share/OVMF /usr/share/edk2/* /usr/share/AAVMF 2>/dev/null || true
+    find /usr/share/OVMF /usr/share/edk2 /usr/share/AAVMF -maxdepth 1 2>/dev/null | head -20
     exit 1
 fi
 echo "  firmware: ${FW}"
 
+# Split OVMF (the *_4M.fd pair, and modern edk2 generally) must be attached as
+# pflash, not -bios: qemu refuses it outright with
+#   "could not load PC BIOS '/usr/share/OVMF/OVMF_CODE_4M.fd'"
+# The VARS half has to be a WRITABLE per-boot copy, so it cannot be the shared
+# read-only system file.
+if [[ -n "$VARS" ]]; then
+    cp "$VARS" "${OUT}/vars-${ARCH}.fd"
+    chmod u+w "${OUT}/vars-${ARCH}.fd"
+    FIRMWARE=(-drive "if=pflash,format=raw,unit=0,readonly=on,file=${FW}"
+              -drive "if=pflash,format=raw,unit=1,file=${OUT}/vars-${ARCH}.fd")
+    echo "  vars:     ${VARS} (writable copy)"
+else
+    FIRMWARE=(-bios "$FW")
+    echo "  vars:     none found; using -bios"
+fi
+
 rm -f "${OUT}/qmp.sock"
-"$BIN" -accel "$ACCEL" -m 4096 -smp 4 -bios "$FW" "${MACHINE[@]}" \
+"$BIN" -accel "$ACCEL" -m 4096 -smp 4 "${FIRMWARE[@]}" "${MACHINE[@]}" \
     -drive "file=${DISK},if=virtio,format=qcow2" \
     -device virtio-net-pci,netdev=n0 -netdev user,id=n0 \
     -device qemu-xhci -device usb-kbd -device usb-tablet \
