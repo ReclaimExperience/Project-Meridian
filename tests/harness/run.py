@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from harness.vm import ROOT, VM, VMError, choose_accelerator, host_arch
 
-SUITES = ("smoke",)
+SUITES = ("smoke", "security", "privacy")
 
 
 def find_disk(arch: str) -> Path:
@@ -71,7 +71,9 @@ def main() -> int:
     print(f"harness: disk={disk}")
 
     started = time.monotonic()
-    vm = VM(disk=disk, arch=args.arch)
+    # The privacy suite audits traffic, so it needs the capture enabled at boot
+    # — it cannot be turned on once the VM is already running.
+    vm = VM(disk=disk, arch=args.arch, capture=args.suite == "privacy")
     failure: BaseException | None = None
     try:
         vm.start()

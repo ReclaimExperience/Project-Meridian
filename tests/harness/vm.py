@@ -127,6 +127,7 @@ class VM:
     arch: str = field(default_factory=host_arch)
     memory_mb: int = 4096
     cpus: int = 4
+    capture: bool = False  # write every guest packet to a pcap (ADR-011 audit)
     evidence: Path = field(default=None)  # type: ignore[assignment]
     _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
     _qmp: QMP | None = field(default=None, init=False, repr=False)
@@ -150,6 +151,10 @@ class VM:
     @property
     def qmp_socket(self) -> Path:
         return self.evidence / f"qmp-{self.arch}.sock"
+
+    @property
+    def capture_file(self) -> Path:
+        return self.evidence / f"capture-{self.arch}.pcap"
 
     @property
     def serial_socket(self) -> Path:
@@ -191,6 +196,8 @@ class VM:
         self.qmp_socket.unlink(missing_ok=True)
         self.serial_socket.unlink(missing_ok=True)
         self.serial_log.unlink(missing_ok=True)
+        if self.capture:
+            self.capture_file.unlink(missing_ok=True)
 
         command = [
             f"qemu-system-{self.arch}",
@@ -210,6 +217,15 @@ class VM:
             "user,id=n0",
             "-device",
             "virtio-rng-pci",
+            *(
+                # qemu mirrors every frame the guest sends or receives. Capturing
+                # on the host means the guest needs no tcpdump, no capabilities
+                # and no awareness it is being watched — so the ADR-011 audit
+                # measures the shipping image, not a special build of it.
+                ["-object", f"filter-dump,id=dump0,netdev=n0,file={self.capture_file}"]
+                if self.capture
+                else []
+            ),
             "-device",
             "qemu-xhci",
             "-device",

@@ -1,0 +1,24 @@
+# ADR-011, in testable form.
+#
+# "Meridian ships no telemetry, crash reporting, analytics, unique identifiers,
+#  or check-in of any kind. The complete list of automatic outbound connections
+#  is: registry update checks (OS + Flatpak), fwupd metadata, NTP, geoip lookup
+#  during OOBE timezone detection, and captive-portal detection."
+#
+# This file IS that list. tests/privacy/network_audit.sh boots an idle system,
+# captures every packet from outside the guest, and fails on any DNS name the
+# guest asked for that does not match a suffix below.
+#
+# Pillar 5 is only a differentiator if it is provable, and it is only provable
+# while this file stays short. Adding a line means a fresh install now talks to
+# somewhere new — an owner decision (rule R-H), never an agent's.
+#
+# One suffix per line: <domain-suffix>  <which ADR-011 clause permits it>
+
+ghcr.io                     OS image update checks (ADR-008 / ADR-014)
+pkg-containers.githubusercontent.com  GHCR blob storage — where the image layers actually come from
+quay.io                     base image and bootc-image-builder pulls
+flathub.org                 Flatpak app update checks (ADR-004)
+fwupd.org                   firmware metadata; offered, never auto-applied (ADR-008)
+pool.ntp.org                time synchronisation
+fedoraproject.org           NTP pool and connectivity check inherited from the base

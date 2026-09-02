@@ -456,6 +456,41 @@ publish stays clean — stricter than PRD 7.4's "bake into pr-NNN artifacts".
    **For WP-02/WP-17:** a user's machine would introduce itself as "fedora" on
    the network and in the shell prompt.
 
+**Slice 2 — the two audits that make ADR-011 and ADR-015 provable:**
+
+- `tests/security/ports.sh` + `suites/security.py`: reads every bound socket in
+  the running image and fails on any non-loopback listener not in
+  `tests/security/allowed-ports.txt` (owner-gated). **It found a real violation
+  on its first run** — see below.
+- `tests/privacy/network_audit.sh` + `suites/privacy.py`: captures every packet
+  from **outside** the guest via qemu `filter-dump`, so the image under audit is
+  the image that ships — the guest needs no tcpdump, no capabilities, and no
+  awareness it is watched. **PASSES**: on a settled idle system the only public
+  destinations are `fedoraproject.org:80` (connectivity check) and
+  `2.fedora.pool.ntp.org:123` (time), each printed with the ADR-011 clause that
+  permits it. Default window is the full 10 minutes; `MERIDIAN_IDLE_SECONDS`
+  shortens it while iterating, but the gate is 600 s — a daily check-in would be
+  invisible to a two-minute sample, and a daily check-in is the thing this
+  exists to catch.
+- `tests/harness/pcap.py`: dependency-free pcap + DNS reader. The audit that
+  proves "zero telemetry" should not rest on a parser nobody reads.
+  `tests/harness/test_pcap.py` proves it against synthetic captures with known
+  contents, including that a garbage file raises rather than reading as clean —
+  a parser that silently returns nothing would make the whole audit vacuous.
+
+**ADR-015 violation found, reported to WP-02 (issue #2):** the image listens on
+**tcp+udp/5355 on all interfaces, IPv4 and IPv6** — LLMNR, on by default in
+`systemd-resolved`. ADR-015 permits exactly one non-loopback listener (mDNS 5353,
+for driverless printing). Not fixed here: WP-01/WP-03 must not change image
+policy, and the allowlist is owner-gated precisely so widening it cannot be a
+convenient way to go green. LLMNR is also a known credential-relay vector on
+untrusted networks, so this is a pillar-5 defect, not a tidiness one.
+
+**Design note for later suites:** the privacy audit checks BOTH what the system
+asked DNS for AND where packets actually went, attributing every public
+destination back to a name via DNS answers. Checking only queried names would
+miss a hard-coded address — which is precisely what a check-in looks like.
+
 **Still to deliver:** OCR text assertions, screenshot-diff with baselines and
 masks, `tests/stories/` + `zt_template.py`, `perf`/`screens`/`security`/`privacy`
 suites, CI `vm-test` job, `docs/testing.md`, and the acceptance items — x86_64
