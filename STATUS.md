@@ -20,7 +20,7 @@ Status: `TODO` | `IN PROGRESS` | `BLOCKED` | `DONE` | `WAIVED`
 | WP-00 | Repository bootstrap & conventions | 0 | S | low | none | DONE |
 | WP-01 | Base image: builds, boots, publishes | 0 | M | medium (external base) | WP-00 | DONE |
 | WP-02 | De-bloat & package curation | 0 | M | low | WP-01 | TODO |
-| WP-03 | VM test harness & story framework | 0 | L | medium | WP-01 (images to test) | TODO |
+| WP-03 | VM test harness & story framework | 0 | L | medium | WP-01 (images to test) | IN PROGRESS |
 | WP-04 | Update pipeline, rollback, signing | 0 | M | medium | WP-01 | TODO |
 | WP-05 | Theme core | 1 | L | medium | WP-02, 03 | TODO |
 | WP-06 | Boot & login: Plymouth, SDDM, silence | 1 | S | low | WP-05 (brand assets) | TODO |
@@ -417,3 +417,47 @@ Open, and deliberately not WP-01's to close:
   emulation). WP-03 and WP-16 must plan x86_64 disk/ISO work around CI runners.
 - No installable ISO exists yet — that is WP-16. Bare-metal testing on real
   hardware begins there and at WP-17/WP-25, not here.
+
+## WP-03 VM test harness — IN PROGRESS 2026-09-02 (agent run 1, slice 1 of ~6)
+
+**Delivered so far:** `tests/harness/` — `qmp.py` (screenshots, key/pointer
+injection, run state), `console.py` (bidirectional serial console = the
+guest-exec channel), `vm.py` (boots a disk image, firmware/accelerator
+selection, evidence collection), `run.py` (suite runner), `suites/smoke.py`;
+real `just vm-test [suite] [arch]`; credential handoff from `just vm-image` via
+`build/dev-credentials.json` (gitignored).
+
+**Verified:** `just vm-test smoke` **PASSES in 25 s** on aarch64/HVF. All seven
+assertions: console login, `display-manager` active, greeter drawn, **GUI login
+through SDDM**, `plasmashell` running, `systemctl --failed` empty, os-release is
+ours. 206 units OK, 0 failed units. Evidence written on success as well as
+failure — a suite whose artifacts appear only on failure gives you nothing to
+compare a regression against.
+
+**Guest-exec choice:** the serial console, not SSH (ADR-015 ships no sshd) and
+not a guest agent (nothing should exist in the image purely to be tested). The
+throwaway account lives only in the local disk image, so the container image we
+publish stays clean — stricter than PRD 7.4's "bake into pr-NNN artifacts".
+
+**Four findings, each of which had already produced a wrong test:**
+
+1. **systemd never narrates the display manager to serial.** 71 unit lines reach
+   the console; the graphical stage is not among them, because plymouth's
+   console handoff swallows it. Ask systemd directly; do not scrape the boot log
+   for a unit description that will never appear.
+2. **A console login is not a desktop login.** `plasmashell` starts only when a
+   session begins through SDDM. The first smoke suite asserted plasmashell after
+   a serial login and would have failed on a perfectly good image.
+3. **Shell OSC 3008 session markers read as failed units.** The ANSI stripper
+   handled BEL-terminated OSC but not ST-terminated, so a prompt marker survived
+   into the `systemctl --failed` parse and looked exactly like a failure.
+4. **The image's hostname is `fedora`, not `meridian`.** `os-release` sets
+   `DEFAULT_HOSTNAME=meridian`, but the base ships an `/etc/hostname` that wins.
+   **For WP-02/WP-17:** a user's machine would introduce itself as "fedora" on
+   the network and in the shell prompt.
+
+**Still to deliver:** OCR text assertions, screenshot-diff with baselines and
+masks, `tests/stories/` + `zt_template.py`, `perf`/`screens`/`security`/`privacy`
+suites, CI `vm-test` job, `docs/testing.md`, and the acceptance items — x86_64
+smoke in CI, deliberately-broken-assertion artifacts, `mtest` absent from any
+pushed digest, and 10x consecutive green for the flaky-rate gate.

@@ -271,7 +271,7 @@ vm-image arch="x86_64":
     # credentials — holds. The password is generated per build and printed once;
     # nothing is committed. WP-03 replaces this with its transient boot-time
     # credential injection.
-    devpass="$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')"
+    devpass="${MERIDIAN_DEV_PASSWORD:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')}"
     conf="$(mktemp -d)/config.toml"
     cat > "$conf" <<TOML
     [[customizations.user]]
@@ -284,6 +284,13 @@ vm-image arch="x86_64":
     data = "dev disk image only - see Justfile\n"
     TOML
     sed -i'' -e 's/^    //' "$conf"
+
+    # The harness needs this credential to use the console channel, so record it
+    # beside the image rather than only printing it. build/ is gitignored and the
+    # account exists in this disk image alone.
+    mkdir -p build
+    printf '{"user": "mtest", "password": "%s"}\n' "${devpass}" > build/dev-credentials.json
+    chmod 600 build/dev-credentials.json
 
     echo "building qcow2 from ${tag}"
     echo "  dev login: mtest / ${devpass}   (this disk image only; never published)"
@@ -395,9 +402,14 @@ vm-run-iso:
 
 # ------------------------------------------------------------------- test ---
 
-# Run a harness suite: smoke | stories | screens | perf | security | privacy
-vm-test suite="smoke":
-    @just _todo WP-03 "vm-test {{ suite }}"
+# Run a harness suite (PRD 7.4). Currently: smoke
+vm-test suite="smoke" arch="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    arch="{{ arch }}"
+    [ -n "$arch" ] || arch="$(uname -m)"
+    [ "$arch" = "arm64" ] && arch=aarch64
+    python3 tests/harness/run.py "{{ suite }}" --arch "$arch"
 
 # Re-baseline one screenshot, deliberately (PRD 7.4, rule R-F)
 baseline screen:
