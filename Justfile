@@ -185,7 +185,18 @@ build arch="x86_64":
     # job — which happened: "unable to copy from source ...fedora-kinoite:44:
     # unexpected EOF (while reconnecting)". Rule R-A treats flaky as broken, so
     # the transient case gets handled rather than re-run.
-    podman pull --retry 3 --retry-delay 5s --platform "${platform}" "${base}"
+    # Retry in shell rather than with `podman pull --retry`: that flag does not
+    # exist in podman 4.9 (Ubuntu 24.04), and PRD 7.2 requires every `just`
+    # target to run identically on a Linux workstation. Found on the x86_64 box.
+    for attempt in 1 2 3; do
+        podman pull --platform "${platform}" "${base}" && break
+        if [ "$attempt" = 3 ]; then
+            echo "just build: could not pull ${base} after 3 attempts"
+            exit 1
+        fi
+        echo "just build: pull failed, retrying in $((attempt * 5))s"
+        sleep $((attempt * 5))
+    done
 
     podman build \
         --platform "${platform}" \
