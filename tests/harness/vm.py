@@ -24,7 +24,6 @@ import platform
 import shutil
 import signal
 import subprocess
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -351,27 +350,12 @@ class VM:
 
     # ----------------------------------------------------------------- wait --
 
-    def wait_for_serial(
-        self, pattern: str, timeout: float = 300.0, poll: float = 2.0
-    ) -> bool:
-        """Wait until `pattern` appears in the boot log.
-
-        This is the harness's only sanctioned way to wait for the guest to reach
-        a state: PRD WP-03 forbids tests that sleep on a wall clock instead.
-        """
-        import re
-
-        compiled = re.compile(pattern)
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if self._process is not None and self._process.poll() is not None:
-                raise VMError(
-                    f"qemu exited while waiting for {pattern!r}\n{self._qemu_stderr()}"
-                )
-            if compiled.search(self.serial_text()):
-                return True
-            time.sleep(poll)
-        return False
+    # `wait_for_serial` was removed. It had no callers, it RETURNED False on
+    # timeout where every other wait raises, and its docstring called it "the
+    # harness's only sanctioned way to wait" — so a later WP following that
+    # docstring and not checking the return value would have got a silent
+    # no-wait: exactly the MJ-6 defect, pre-installed. Use
+    # Console.wait_until/wait_for, which raise.
 
     # ------------------------------------------------------------- evidence --
 

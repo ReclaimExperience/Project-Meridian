@@ -24,7 +24,7 @@ _todo wp target:
 # ------------------------------------------------------------------- lint ---
 
 # Full lint suite (PRD 6.3). Green from day one — this is WP-00's acceptance.
-lint: lint-toolchain lint-shell lint-justfile lint-python lint-schemas lint-branding lint-strings lint-codeowners lint-markdown
+lint: lint-toolchain lint-wired lint-shell lint-justfile lint-workflows lint-python lint-schemas lint-branding lint-strings lint-codeowners lint-markdown
     @echo
     @echo "lint: all checks passed"
 
@@ -74,10 +74,20 @@ lint-shell:
     shellcheck "${files[@]}"
     echo "  lint-shell: ${#files[@]} script(s) clean"
 
+# every check that exists must actually be invoked by something — the outermost
+# form of a vacuous pass is a guard nothing calls
+lint-wired:
+    @python3 tests/lint/wired.py
+
 # shellcheck the bash embedded in Justfile recipes — the largest unlinted
 # shell surface in the repo, and where every shell defect so far has lived.
 lint-justfile:
     @python3 tests/lint/justfile_shell.py
+
+# shellcheck the inline run: blocks in GitHub workflows — the shell surface left
+# over after the logic was extracted into ci/*.sh
+lint-workflows:
+    @python3 tests/lint/workflow_shell.py
 
 # ruff over every tracked Python file
 lint-python:
@@ -131,6 +141,8 @@ test-lint:
     @python3 tests/harness/test_pcap.py
     @echo
     @python3 tests/harness/test_suite_guards.py
+    @echo
+    @python3 tests/harness/test_screendiff_stories.py
 
 # ------------------------------------------------------------------ build ---
 

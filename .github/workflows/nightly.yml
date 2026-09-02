@@ -8,8 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       suites:
-        description: "Space-separated suites to run"
-        default: "smoke privacy security"
+        # MUST NOT include `security`: it is expected-red until WP-02, and the
+        # gating step below would then be permanently red. The flaky-rate gate
+        # is run from THIS form (repeat: 10), so a default carrying `security`
+        # made WP-03's own acceptance item unsatisfiable — the same shape NEW-4
+        # fixed for PRD 7.5, one layer out.
+        description: "Space-separated GATING suites (not `security`)"
+        default: "smoke privacy"
       repeat:
         description: "Run the suite list N times (the WP-03 flaky-rate gate uses 10)"
         default: "1"
@@ -46,12 +51,23 @@ jobs:
       # expected-to-fail belongs in it — a permanently red job hides the
       # regression it exists to catch.
       - name: Harness suites
+        env:
+          # Via env, not interpolated into the script body: a dispatch value
+          # containing a quote would otherwise break out of the shell.
+          SUITES: ${{ github.event.inputs.suites }}
+          REPEAT: ${{ github.event.inputs.repeat }}
         run: |
           set -euo pipefail
-          suites='${{ github.event.inputs.suites }}'
+          suites="${SUITES:-}"
           [ -n "$suites" ] || suites="smoke privacy"
-          repeat='${{ github.event.inputs.repeat }}'
+          repeat="${REPEAT:-}"
           [ -n "$repeat" ] || repeat=1
+          case "$suites" in
+            *security*)
+              echo "::error::`security` is expected-red until WP-02 and must not"
+              echo "::error::run in the gating step; it has its own advisory step."
+              exit 1 ;;
+          esac
           # shellcheck disable=SC2086
           bash ci/vm-test.sh x86_64 --repeat "$repeat" $suites
 

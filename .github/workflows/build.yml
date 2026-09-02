@@ -98,8 +98,11 @@ jobs:
       # WP-03 acceptance: the harness logs in as `mtest`, so prove that account
       # is absent from the image that was actually PUSHED — not from a local
       # build of it.
+      # BOTH arches. The VM suites are x86_64-only for runner cost, but this is
+      # one `podman run` on a native runner — and build-aarch64 was a REQUIRED
+      # check that pushed an image without a single assertion against it.
       - name: Published image carries no test credentials
-        if: matrix.arch == 'x86_64' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         run: bash ci/check-no-test-user.sh '${{ steps.tag.outputs.tag }}'
 
       - name: Upload harness evidence

@@ -102,11 +102,51 @@ def main() -> int:
             failures += check("BL-1 missing capture is refused", True)
 
     # BL-2: the credential check must not report clean when the probe never ran.
+    #
+    # The stub must let `image exists` and `pull` SUCCEED and fail only at `run`.
+    # An earlier version of this test stubbed podman to fail at every
+    # subcommand, so the script short-circuited at "could not obtain the image"
+    # and never reached the sentinel logic that IS the fix — a regression test
+    # that was itself a vacuous pass, green on a repo where the blocker had been
+    # fully reopened.
+    stubs = {
+        "run fails silently (the original BL-2 shape)": 'case "$1" in image) exit 0;; run) exit 125;; *) exit 0;; esac',
+        "run succeeds but emits nothing (no sentinel)": 'case "$1" in image) exit 0;; run) exit 0;; *) exit 0;; esac',
+        "run emits a planted finding": 'case "$1" in image) exit 0;; '
+        'run) echo __probe_ran__; echo "mtest in passwd: mtest:x:1001:"; exit 0;; '
+        "*) exit 0;; esac",
+    }
+    for name, body in stubs.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            bindir = Path(tmp) / "bin"
+            bindir.mkdir()
+            stub = bindir / "podman"
+            stub.write_text(f"#!/bin/sh\n{body}\n")
+            stub.chmod(0o755)
+            env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+            result = subprocess.run(
+                ["bash", str(ROOT / "ci/check-no-test-user.sh"), "example/image"],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            failures += check(
+                f"BL-2 {name}",
+                result.returncode != 0,
+                f"exited {result.returncode}: {result.stdout.strip().splitlines()[-1:]}",
+            )
+
+    # ...and it must still PASS on a genuinely clean probe, or it is just a
+    # check that always fails, which proves nothing either.
     with tempfile.TemporaryDirectory() as tmp:
         bindir = Path(tmp) / "bin"
         bindir.mkdir()
         stub = bindir / "podman"
-        stub.write_text("#!/bin/sh\nexit 125\n")
+        stub.write_text(
+            '#!/bin/sh\ncase "$1" in image) exit 0;; '
+            "run) echo __probe_ran__; exit 0;; *) exit 0;; esac\n"
+        )
         stub.chmod(0o755)
         env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
         result = subprocess.run(
@@ -117,8 +157,8 @@ def main() -> int:
             check=False,
         )
         failures += check(
-            "BL-2 broken probe does not report clean",
-            result.returncode != 0,
+            "BL-2 clean probe still passes",
+            result.returncode == 0,
             f"exited {result.returncode}",
         )
 

@@ -3,7 +3,7 @@
 #
 #   ci/check-no-test-user.sh <image-ref>
 #
-# The harness logs in as `mtest`, so the obvious question is whether that account
+# The harness logs in as `${ACCOUNT}`, so the obvious question is whether that account
 # ships. It must not: PRD 7.4 requires no published image contain test
 # credentials, so a `:testing` digest stays promotable to `:stable` by pure
 # retag (7.3).
@@ -18,6 +18,17 @@
 set -euo pipefail
 
 REF="${1:?usage: ci/check-no-test-user.sh <image-ref>}"
+
+# The account name comes from the same place `just vm-image` creates it, so
+# renaming the harness account cannot leave this probe silently grepping for a
+# string nobody uses any more.
+ACCOUNT="${2:-}"
+if [[ -z "$ACCOUNT" ]]; then
+    ACCOUNT="$(grep -oE 'name = "[a-z0-9_-]+"' "$(dirname "${BASH_SOURCE[0]}")/../Justfile" \
+               | head -1 | sed 's/.*"\(.*\)"/\1/')"
+fi
+: "${ACCOUNT:?could not determine the harness account name from the Justfile}"
+echo "probing for account: ${ACCOUNT}"
 
 echo "checking published image for test access: ${REF}"
 # Only reach for the registry when the image is not already here: `podman pull`
@@ -42,16 +53,16 @@ SENTINEL="__probe_ran__"
 set +e
 output="$(podman run --rm --entrypoint /bin/bash "$REF" -c "
     echo ${SENTINEL}
-    getent passwd mtest 2>/dev/null | sed 's/^/mtest in passwd: /'
-    grep -h '^mtest:' /etc/passwd /usr/lib/passwd 2>/dev/null | sed 's/^/mtest in passwd file: /'
-    ls -d /home/mtest /var/home/mtest 2>/dev/null | sed 's/^/mtest home: /'
-    grep -rl mtest /usr/lib/systemd /etc/systemd 2>/dev/null | sed 's/^/systemd unit mentions mtest: /'
+    getent passwd '"'${ACCOUNT}'"' 2>/dev/null | sed 's/^/${ACCOUNT} in passwd: /'
+    grep -h '^${ACCOUNT}:' /etc/passwd /usr/lib/passwd 2>/dev/null | sed 's/^/${ACCOUNT} in passwd file: /'
+    ls -d /home/${ACCOUNT} /var/home/${ACCOUNT} 2>/dev/null | sed 's/^/${ACCOUNT} home: /'
+    grep -rl ${ACCOUNT} /usr/lib/systemd /etc/systemd 2>/dev/null | sed 's/^/systemd unit mentions ${ACCOUNT}: /'
     # sysusers.d is how a user is DECLARED on an ostree/bootc image, where
     # /etc/passwd is regenerated on first boot — so an account can ship without
     # ever appearing in the passwd files this probe was originally checking.
-    grep -rl mtest /usr/lib/sysusers.d /etc/sysusers.d 2>/dev/null | sed 's/^/sysusers.d declares mtest: /'
-    grep -h '^mtest:' /etc/shadow /usr/lib/shadow 2>/dev/null | sed 's/^/mtest in shadow: /'
-    grep -rl mtest /etc/sudoers.d /usr/lib/sudoers.d 2>/dev/null | sed 's/^/sudoers grants mtest: /'
+    grep -rl ${ACCOUNT} /usr/lib/sysusers.d /etc/sysusers.d 2>/dev/null | sed 's/^/sysusers.d declares ${ACCOUNT}: /'
+    grep -h '^${ACCOUNT}:' /etc/shadow /usr/lib/shadow 2>/dev/null | sed 's/^/${ACCOUNT} in shadow: /'
+    grep -rl ${ACCOUNT} /etc/sudoers.d /usr/lib/sudoers.d 2>/dev/null | sed 's/^/sudoers grants ${ACCOUNT}: /'
     find / -name authorized_keys -not -path '/proc/*' 2>/dev/null | sed 's/^/authorized_keys: /'
     true
 " 2>&1)"
@@ -84,5 +95,5 @@ if [[ -n "$findings" ]]; then
     exit 1
 fi
 
-echo "  ok  no mtest account, no home, no credential unit, no authorized_keys"
+echo "  ok  no ${ACCOUNT} account, no home, no credential unit, no authorized_keys"
 echo "published image is clean (PRD 7.4)"

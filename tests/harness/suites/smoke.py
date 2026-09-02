@@ -38,10 +38,9 @@ def run(vm: VM, credentials: dict) -> None:
     # --- 2. the display manager is actually running --------------------------
     console.wait_until(
         "systemctl is-active display-manager",
-        # NOT endswith("active"): "inactive" ends with "active".
-        # Any line, not the last: a kernel printk can land after the
-        # output on this console. And not endswith: "inactive" ends
-        # with "active". Empty output must not raise IndexError.
+        # Any line, not the last: a kernel printk can land after the output
+        # on this console. Not endswith: "inactive" ends with "active".
+        # Empty output must not raise IndexError.
         lambda out: any(ln.strip() == "active" for ln in out.splitlines()),
         timeout=300,
         description="display-manager to be active",

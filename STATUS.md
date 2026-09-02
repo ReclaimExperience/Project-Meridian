@@ -622,8 +622,8 @@ defects sat in the same outermost-layer class.
 | NEW-1 (major) | **`PYTHONOPTIMIZE=1` made every suite pass vacuously.** Every verdict is a bare `assert`, so one inherited environment variable turned the machinery every later WP's acceptance rests on into a rubber stamp. Demonstrated: a suite whose body is `assert False` exited **0** under `-O`. | The runner refuses to start with assertions disabled. |
 | NEW-2 (major) | **MJ-6 was not fixed.** The replacement predicate (`pgrep -c plasmashell >= 1`) is true in exactly the states the wait above it already required, so it returned on the first poll — the second wait in a row that looked like a wait and was not. STATUS claimed it fixed. | Waits until two consecutive screenshots are identical — something that genuinely starts false. Observed: *"settled after 3 frame(s)"*, and both screens now compare at RMSE 0.0000. |
 | NEW-3 (major) | The credential probe **missed `sysusers.d`** — the idiomatic way to declare a user on a bootc image, where `/etc/passwd` is regenerated on first boot. A planted `probe-sysusers` image reported clean. | Also greps `sysusers.d`, `shadow`, `sudoers.d`. |
-| NEW-4 (major) | The nightly ran `security` — documented as expected-red — in the **same job** as `smoke` and `privacy`, so a real regression in either was invisible inside a permanently red job, and **PRD 7.5's promote-to-stable gate ("nightly green 2 consecutive days") was unsatisfiable by construction.** | Split: a gating job for `smoke`+`privacy`, and a separate ADR-015 job that reports loudly and does not gate. **Promote-to-stable remains blocked until WP-02** — that is now stated in the job output rather than implied. |
-| NEW-5 (major) | **Neither blocker fix had a regression test**, so both could be silently reopened. "Proven both ways" was a one-time manual claim with no committed artifact. | `tests/harness/test_suite_guards.py` covers BL-1, BL-2 and NEW-1, needs no VM, and runs in `just test-lint`. |
+| NEW-4 (major) | The nightly ran `security` — documented as expected-red — in the **same job** as `smoke` and `privacy`, so a real regression in either was invisible inside a permanently red job, and **PRD 7.5's promote-to-stable gate ("nightly green 2 consecutive days") was unsatisfiable by construction.** | Split into a gating **step** for `smoke`+`privacy` and a `continue-on-error` ADR-015 **step** (one job, not two — the round-2 wording said "job"). **Half-applied:** the dispatch default still shipped `security` into the gating step. See round 3, R3-3. **Promote-to-stable remains blocked until WP-02** — that is now stated in the job output rather than implied. |
+| NEW-5 (major) | **Neither blocker fix had a regression test**, so both could be silently reopened. | `test_suite_guards.py` added — but its **BL-2 case tested the wrong branch** and was itself a vacuous pass. See round 3, R3-1. |
 | NEW-6..NEW-14 | `--repeat 0` ran nothing and exited 0; the `is-active` predicate crashed on empty output and was defeated by a trailing printk; `SystemExit` escaped the runner and exited 0; a story failing at *import* aborted every later story; `from typing import Self` needs 3.11 while the PRD 7.2 Mac path has 3.9; masks were capped but the **threshold was not**; the merged ADR-015 assert mislabelled the sshd finding; stale docstrings. | All fixed. |
 
 **Two things the owner should know.** PRD 7.5's promote-to-stable gate cannot be
@@ -636,3 +636,37 @@ which PRD 7.4 explicitly permits to carry test credentials; only the push-to-
 suites, round 2 found them in the layer around the suites — the runner's exit
 paths, the CI job structure, and the interpreter mode. Each round the core held
 and the outermost layer did not. **When reviewing a gate, start at the outside.**
+
+## WP-03 review round 3 — the gate's own composition
+
+Third review. The suites and the runner held under everything thrown at them —
+the reviewer attacked the `PYTHONOPTIMIZE` guard six ways, the mask/threshold
+ceilings seven ways, `--repeat` validation, the sentinel console protocol and
+the BL-1 positive control, and broke none of them. What broke was the machinery
+that decides **whether the checks run at all**, plus the round-2 regression test
+written to stop a blocker being reopened.
+
+| ID | What was wrong | Fix |
+|---|---|---|
+| R3-1 (blocker) | **The BL-2 regression test did not exercise the BL-2 fix.** Its stub `podman` failed at *every* subcommand, so the script short-circuited at "could not obtain the image" and never reached the sentinel logic that IS the fix. Deleting the fix left the guard green — a regression test that was itself a vacuous pass. | The stub now succeeds at `image exists`/`pull` and fails only at `run`, plus a no-sentinel case, a planted-finding case, and a clean case. **Verified by reopening BL-2: the guard goes red.** |
+| R3-2 (blocker) | **Nothing noticed a check that exists but is never executed.** `just lint`/`test-lint` enumerate their sub-checks by hand. Two brand-new always-failing checks were committed and all three gates reported success without running either. The outermost vacuous pass: not a check that passes wrongly, but one nothing calls. | `tests/lint/wired.py` fails if any `tests/lint/*` or `tests/harness/test_*` is not invoked by a recipe (following one hop through `.sh` wrappers), if any `ci/*.sh` is not invoked by a workflow, or if a required check name is not produced. Proven both ways. |
+| R3-3 (major) | The nightly's **dispatch default still carried `security`** into the gating step — and the flaky-rate gate is *run from that form*, so WP-03's own acceptance item was unsatisfiable. NEW-4's shape, one layer out. | Default is `smoke privacy`; `security` in the gating list is now a hard error; inputs pass via `env:` so a quote cannot break out of the script. |
+| R3-4 (major) | The credential probe **grepped for a hard-coded `mtest`** unlinked from the Justfile that creates the account, and **skipped aarch64 entirely** — so `build-aarch64` was a required check that pushed an image with no assertion against it. | The account name is read from the Justfile; the check runs on both arches. |
+| R3-5 (major) | **`screens` and `stories` ran in no automated context.** The screendiff apparatus — the largest body of code in this WP — had zero coverage, and `stories` returned green having run nothing, so "a story that exists and does not pass is a failure" was unproven. | `test_screendiff_stories.py` exercises both without a VM: real difference, identical, missing baseline, full-image mask, threshold ceiling, **and a deliberately failing story making the suite fail.** |
+| R3-6 (minor→major later) | `_settle_screen` had **no positive control** — a frozen or black screen "settled" on frame two, the BL-1 shape moved into a wait. It also wrote a three-panel diff sheet on every non-settled poll. | Now requires the settled frame to carry real detail (stddev ≥ 0.02; a real desktop measures 0.125, black 0.000), and compares directly so no spurious diff sheets are written. **First attempt was wrong** — requiring an observed *change* failed a correctly-finished desktop, which is static by the time this runs. |
+| R3-7 | Dead `wait_for_serial`: no callers, **returned `False`** on timeout where every other wait raises, and a docstring calling it "the harness's only sanctioned way to wait" — MJ-6 pre-installed for a later WP. | Deleted, with a note saying why. |
+| R3-8 | **27 inline shell blocks in the workflows were linted by nothing** — the same argument that justified linting the Justfile recipes. The tell was a live `# shellcheck disable=SC2086` written by an author who believed the file was linted. | `tests/lint/workflow_shell.py`; 17 blocks clean, and proven to catch a planted `rm -rf $UNQUOTED/*`. |
+| R3-9, R3-10 | Round-2 edit residue (a comment duplicated within itself) and two STATUS overclaims (NEW-5's BL-2 coverage; NEW-4 described as a separate "job" when it is a step). | Fixed; the round-2 table above now says what is actually true. |
+
+**Known and stated, not fixed here:** `screens` cannot run in CI because only
+aarch64 baselines exist and CI is x86_64; x86_64 baselines must be produced on
+an x86_64 runner and committed deliberately (R-F). `stories` runs nowhere
+automatically until stories exist. Both now have no-VM guards instead.
+
+**The pattern, third confirmation.** Round 1: vacuous passes inside the suites.
+Round 2: in the layer around them. Round 3: in the composition of the gate —
+whether a check is named in a hand-maintained list, whether a step sits inside a
+job whose name is typed into a settings page. Each round the core held and the
+outermost layer did not. `tests/lint/wired.py` exists because that layer had
+nothing watching it at all; it is the first check in this repo whose subject is
+*the other checks*.
