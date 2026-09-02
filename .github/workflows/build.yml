@@ -1,0 +1,101 @@
+# Thin shim — the body lives in ci/build.sh (PRD 7.1, 7.3).
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          # [VERIFY] free arm64 runners for public repos (PRD 7.3). If this job
+          # cannot get a runner, the pre-authorized fallback is a qemu
+          # cross-build on nightly only — do not silently drop the arch.
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+
+    name: build-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: extractions/setup-just@v3
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq podman skopeo
+          python3 -m pip install --quiet --break-system-packages jsonschema
+
+      # An OS image does not fit on a hosted runner's root disk. See the script.
+      - name: Prepare runner storage
+        run: bash ci/prepare-runner.sh
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          # --password-stdin: a token passed as -p is visible in /proc.
+          echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      # PR images go to a throwaway pr-NNN tag; main goes to :testing. Nothing
+      # here ever writes :stable — that is the weekly promote gate's job (7.5).
+      - name: Compute push tag
+        id: tag
+        run: |
+          image="$(python3 -c "import json;d=json.load(open('os/rootfs/usr/share/meridian/branding.json'));print(d['registry']['namespace']+'/'+d['registry']['image'])")"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "tag=${image}:pr-${{ github.event.number }}-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${image}:testing-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # One invocation per job: it builds, then pushes and verifies the pushed
+      # labels. Running the script twice rebuilt the whole image.
+      #
+      # Fork PRs get no GHCR credentials, so they build without pushing. ADR-014
+      # makes this repo public, so fork PRs are a real path, not a hypothetical —
+      # they must not fail on a push they were never able to perform.
+      - name: Build and push
+        env:
+          CAN_PUSH: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$CAN_PUSH" = "true" ]; then
+            bash ci/build.sh ${{ matrix.arch }} --push '${{ steps.tag.outputs.tag }}'
+          else
+            echo "Fork pull request: building without pushing (no registry credentials)."
+            echo "The pushed-label check therefore does not run for this PR."
+            bash ci/build.sh ${{ matrix.arch }}
+          fi
+
+      # WP-01 stopgap: boot the image once and photograph the greeter, because
+      # its acceptance asks for a manual screenshot and the x86_64 disk image
+      # cannot be built on the owner's Apple Silicon machine at all. Also
+      # answers the PRD 7.3 [VERIFY] on /dev/kvm. WP-03 deletes this.
+      - name: Boot and photograph the greeter
+        if: matrix.arch == 'x86_64'
+        run: |
+          sudo apt-get install -y -qq qemu-system-x86 ovmf
+          python3 -m pip install --quiet --break-system-packages pillow
+          bash ci/boot-screenshot.sh x86_64
+
+      - name: Upload boot evidence
+        if: matrix.arch == 'x86_64' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wp-01-boot-evidence-x86_64
+          path: |
+            build/evidence/greeter-x86_64.png
+            build/evidence/serial-x86_64.txt
+          if-no-files-found: warn

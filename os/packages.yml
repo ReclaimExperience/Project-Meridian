@@ -1,0 +1,29 @@
+# The single source of truth for RPM changes to the base image (PRD 6.2).
+#
+# The Containerfile consumes this file. A package name appearing anywhere else —
+# an inline `dnf install` in the Containerfile, a build script, a Justfile recipe
+# — fails CI lint. Greppability is auditability: "what is in this OS and why"
+# must be answerable by reading one file.
+#
+# Removals are CODEOWNERS-gated (rule R-H): taking a package out can silently
+# break a driver or codec path that only shows up on someone's real hardware.
+#
+# WP-01 ships this file empty on purpose. WP-02 (de-bloat & package curation)
+# populates it against the PRD 3.2 manifest.
+
+version: 1
+
+# Packages layered on top of the base image.
+add: []
+
+# Packages removed from the base image.
+#
+# ADR-002 warning for WP-02: never remove anything ublue's driver/codec stack
+# provides, even when it looks unused in a VM. It is not unused on Pat's 2017 HP.
+remove: []
+
+# Systemd units masked or disabled in the image. Baloo lands here (ADR-016),
+# along with anything the WP-02 audit finds phoning home (ADR-011).
+systemd:
+  mask: []
+  disable: []

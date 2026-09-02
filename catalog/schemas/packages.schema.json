@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "packages.schema.json",
+  "title": "os/packages.yml — the only place RPM changes may be declared (PRD 6.2)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "add", "remove"],
+  "$defs": {
+    "packageList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$" }
+    },
+    "unitList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9@._-]+\\.(service|timer|socket|target|path|mount)$" }
+    }
+  },
+  "properties": {
+    "version": { "const": 1 },
+    "add": { "$ref": "#/$defs/packageList" },
+    "remove": { "$ref": "#/$defs/packageList" },
+    "systemd": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mask": { "$ref": "#/$defs/unitList" },
+        "disable": { "$ref": "#/$defs/unitList" }
+      }
+    }
+  }
+}

@@ -18,14 +18,39 @@ jobs:
 
       - uses: extractions/setup-just@v3
 
+      # Versions are pinned in ci/tool-versions.env. Ubuntu's apt shellcheck is
+      # 0.9.0 and disagrees with current releases, which made `just lint` green
+      # locally and red here on the same commit.
       - name: Install lint tools
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck
-          pipx install ruff
-          pipx install check-jsonschema >/dev/null || true
-          python3 -m pip install --quiet --break-system-packages jsonschema
-          npm install -g markdownlint-cli >/dev/null
+          set -euo pipefail
+          source ci/tool-versions.env
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            | tar -xJ --strip-components=1 -C /usr/local/bin "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          pipx install "ruff==${RUFF_VERSION}"
+          # PyYAML is imported by tests/lint/schemas.py and the parser test.
+          # It happens to be present on the hosted image; do not rely on that.
+          python3 -m pip install --quiet --break-system-packages jsonschema PyYAML
+          npm install -g "markdownlint-cli@${MARKDOWNLINT_VERSION}" >/dev/null
 
       - name: Lint
         run: bash ci/lint.sh
+
+      # R-H is only a gate while every CODEOWNERS rule resolves to a real owner
+      # with write access. GitHub silently applies NO review requirement for an
+      # unresolvable owner, so this failing quietly is indistinguishable from
+      # having no CODEOWNERS at all. Ask GitHub directly.
+      - name: CODEOWNERS resolves to real owners
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          errors="$(gh api "repos/${GITHUB_REPOSITORY}/codeowners/errors?ref=${GITHUB_SHA}" \
+                    --jq '.errors | length')"
+          if [ "$errors" != "0" ]; then
+            echo "::error::${errors} CODEOWNERS rule(s) do not resolve — rule R-H is NOT enforced."
+            gh api "repos/${GITHUB_REPOSITORY}/codeowners/errors?ref=${GITHUB_SHA}" \
+              --jq '.errors[] | "  line \(.line): \(.message)"'
+            exit 1
+          fi
+          echo "CODEOWNERS: all rules resolve to real owners with write access."

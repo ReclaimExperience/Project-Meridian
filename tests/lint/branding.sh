@@ -31,7 +31,12 @@ SHORT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["shortNa
 #   CONTRIBUTING-AGENTS.md — verbatim copy of PRD section 14 (prose, not shipped)
 #   README.md              — repo front door (prose, swept at WP-26)
 #   tests/lint/branding.sh — this file's own comments
-EXCLUDE_RE='^(os/rootfs/usr/share/meridian/branding\.json|docs/|STATUS\.md|CONTRIBUTING-AGENTS\.md|README\.md|tests/lint/branding\.sh)'
+# End-anchored: bash's =~ does not anchor, so without (/|$) a file named
+# README.md.probe or branding.json.tmpl would silently inherit the exemption.
+# Directory entries carry NO trailing slash: the (/|$) suffix supplies it.
+# Writing 'docs/' here would require a literal 'docs//' and silently unexclude
+# the entire docs tree.
+EXCLUDE_RE='^(os/rootfs/usr/share/meridian/branding\.json|docs|STATUS\.md|CONTRIBUTING-AGENTS\.md|README\.md|tests/lint/branding\.sh)(/|$)'
 
 fail=0
 while IFS= read -r file; do

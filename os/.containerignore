@@ -1,0 +1,8 @@
+# Build-context exclusions for os/Containerfile.
+#
+# os/rootfs/ mirrors the image tree one-to-one (PRD 6.2), which means anything
+# left in it ships inside the operating system. These two patterns are repo
+# bookkeeping — directory documentation and placeholders that keep empty
+# directories in git — and must never reach a user's disk.
+rootfs/**/README.md
+rootfs/**/.gitkeep

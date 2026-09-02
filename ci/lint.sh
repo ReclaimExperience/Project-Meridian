@@ -7,7 +7,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# Warn loudly when the local toolchain differs from the pinned one: a clean
+# local run means nothing if CI runs a different linter (PRD 7.1).
+check_pinned() {
+    local name="$1" want="$2" have="$3"
+    if [[ "$want" != "$have" ]]; then
+        echo "  WARNING: ${name} ${have} != pinned ${want} (ci/tool-versions.env)."
+        echo "           Local and CI results can legitimately differ."
+    fi
+}
+
 echo "::group::tool versions"
+# Path is runtime-resolved, so shellcheck cannot follow it.
+# shellcheck source=/dev/null
+source "${ROOT}/ci/tool-versions.env"
+check_pinned shellcheck "$SHELLCHECK_VERSION" "$(shellcheck --version | awk '/^version:/{print $2}')"
+check_pinned ruff "$RUFF_VERSION" "$(ruff --version | awk '{print $2}')"
+check_pinned markdownlint "$MARKDOWNLINT_VERSION" "$(markdownlint --version 2>/dev/null || echo absent)"
 bash --version | head -1
 just --version
 shellcheck --version | grep -E '^version:'

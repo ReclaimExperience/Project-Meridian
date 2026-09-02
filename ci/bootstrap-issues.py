@@ -84,7 +84,10 @@ def main() -> int:
     args = parser.parse_args()
 
     packages = parse_work_packages()
-    print(f"parsed {len(packages)} work packages from the PRD")
+    print(
+        f"parsed {len(packages)} work packages from the PRD "
+        f"(WP-00 is this bootstrap and gets no tracking issue, so {len(packages) - 1} to create)"
+    )
 
     have: set[str] = set()
     if not args.dry_run:
