@@ -19,7 +19,7 @@ Status: `TODO` | `IN PROGRESS` | `BLOCKED` | `DONE` | `WAIVED`
 |---|---|---|---|---|---|---|
 | WP-00 | Repository bootstrap & conventions | 0 | S | low | none | DONE |
 | WP-01 | Base image: builds, boots, publishes | 0 | M | medium (external base) | WP-00 | DONE |
-| WP-02 | De-bloat & package curation | 0 | M | low | WP-01 | TODO |
+| WP-02 | De-bloat & package curation | 0 | M | low | WP-01 | IN PROGRESS |
 | WP-03 | VM test harness & story framework | 0 | L | medium | WP-01 (images to test) | IN PROGRESS |
 | WP-04 | Update pipeline, rollback, signing | 0 | M | medium | WP-01 | TODO |
 | WP-05 | Theme core | 1 | L | medium | WP-02, 03 | TODO |
@@ -670,3 +670,59 @@ job whose name is typed into a settings page. Each round the core held and the
 outermost layer did not. `tests/lint/wired.py` exists because that layer had
 nothing watching it at all; it is the first check in this repo whose subject is
 *the other checks*.
+
+---
+
+## WP-02 De-bloat & package curation — IN PROGRESS (agent run 1)
+
+**Delivered:** `os/packages.yml` populated — 13 adds, 23 removes, `baloo_file.service`
+masked (ADR-016's sanctioned dep-locked alternative, recorded as the WP asks);
+`apply-packages.sh` cascade/survival/protection guards; the two inventory-after
+files; `tests/perf/idle_ram.sh`, `boot_time.sh` and `budgets.json` plus the
+`perf` harness suite; `security` and `perf` promoted into the PR gate.
+
+**Numbers:** rpms 2045 → 2037; desktop entries 192 → 179; **launcher-visible 34 → 17**.
+The rpm total barely moves because the removals are leaf apps and the 2,000
+underneath are ADR-002's driver/codec/font stack. 17 is not yet 3.2's ~12.
+
+**The defect this WP exists to have caught:** removing `kmenuedit` removed
+`plasma-desktop` and `plasma-workspace` and the build exited **0**. `dnf remove`
+takes dependents with it, and verifying that the *listed* packages are gone does
+not notice the unlisted casualties. `packages.yml` now declares `protect:` and a
+removal that takes any of it fails the build. It then caught `PackageKit-Qt6`
+(86 packages incl. dolphin) — which `rpm -q --whatrequires` had reported as
+required by nothing, because Plasma depends on the **SONAME**, not the name.
+
+**Also found:** `protect:` listed `sddm`, which Fedora 44 does not install at all
+(plasmalogin replaced it), so the login screen was unguarded behind an entry that
+read like protection. Protect entries must now exist or the build fails.
+
+**ADR-015 (issue #2) closed:** LLMNR off (`resolved.conf.d`), `openssh-server`
+removed. The nightly's expected-red advisory job is deleted, not kept alongside —
+a failure with a green place to land is not a failure. PRD 7.5's promote-to-stable
+gate is unblocked on this axis.
+
+**Fonts:** Liberation/Carlito/Caladea added — metric-compatible, so Windows
+`.docx` keeps its line breaks. Verified by `fc-match`, not by rpm presence alone.
+Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
+
+**NOT done — WP-02 is not DONE until these land:**
+
+- **Idle RAM is unmeasured.** The gate exists and is enforced, but no number has
+  been produced: it needs a VM, and the build host's sudo is password-gated. The
+  first measurement comes from PR #31's CI. If it exceeds 1.1 GiB, escalate (the
+  WP says so explicitly) — do not adjust `budgets.json` (R-E).
+- Launcher screenshot for the 3.2 visible-set acceptance.
+- `systemctl --failed` empty is asserted by `smoke`, not yet confirmed on this image.
+
+**Open thread for WP-07:** the remaining 5 launcher entries above 3.2's ~12 are
+`konsole`, `kmenuedit`, three `fcitx5` entries and a duplicate System Settings.
+All are dependency-locked into Plasma, so they must be **hidden** via KIOSK, not
+removed (ADR-006's konsole precedent). Removing `kmenuedit` is what deleted the
+desktop.
+
+**Open thread for WP-04:** `ublue-os-update-services` is still installed and
+overrides `rpm-ostreed` and flatpak update timers. That collides with ADR-008's
+bootc+greenboot path. Left alone deliberately — WP-04 owns the update pipeline
+and should decide, rather than WP-02 changing update behaviour as a side effect
+of de-bloating.
