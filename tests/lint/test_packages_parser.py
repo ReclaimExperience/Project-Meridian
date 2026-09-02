@@ -155,10 +155,21 @@ def observed_actions(actions: str) -> dict[str, list[str]]:
         if not parts:
             continue
         tool, args = parts[0], parts[1:]
+
+        # Ignore flags, not just the two literals: the install line carries
+        # --setopt=install_weak_deps=False, and treating a flag as a package
+        # name made every canonical case fail.
+        def names(items):
+            return [
+                a
+                for a in items
+                if not a.startswith("-") and a not in ("install", "remove")
+            ]
+
         if tool == "dnf" and "install" in args:
-            seen["add"] += [a for a in args if a not in ("-y", "install")]
+            seen["add"] += names(args)
         elif tool == "dnf" and "remove" in args:
-            seen["remove"] += [a for a in args if a not in ("-y", "remove")]
+            seen["remove"] += names(args)
         elif tool == "systemctl" and args and args[0] in ("mask", "disable"):
             seen[args[0]] += args[1:]
     return seen

@@ -235,14 +235,46 @@ to_items "$DISABLE_RAW"; DISABLE=("${ITEMS[@]+"${ITEMS[@]}"}")
 
 echo "apply-packages: add=${#ADD[@]} remove=${#REMOVE[@]} mask=${#MASK[@]} disable=${#DISABLE[@]}"
 
+# INSTALL FIRST, THEN REMOVE. The other order looks natural and is wrong: the
+# install step drags removed packages back in as dependencies, and the build
+# still reports success. WP-02 hit this — plasma-welcome was removed and then
+# reinstalled as a weak dependency, so the OOBE wizard the removal existed to
+# delete was still in the image at the end.
+#
+# --setopt=install_weak_deps=False for the same reason and for pillar 4: a
+# Recommends is someone else's opinion about what a desktop should include, and
+# this product's whole claim is that it ships ~12 apps.
+if [[ ${#ADD[@]} -gt 0 ]]; then
+    echo "apply-packages: installing ${ADD[*]}"
+    dnf -y --setopt=install_weak_deps=False install "${ADD[@]}"
+fi
+
 if [[ ${#REMOVE[@]} -gt 0 ]]; then
     echo "apply-packages: removing ${REMOVE[*]}"
     dnf -y remove "${REMOVE[@]}"
 fi
 
-if [[ ${#ADD[@]} -gt 0 ]]; then
-    echo "apply-packages: installing ${ADD[*]}"
-    dnf -y install "${ADD[@]}"
+# Prove the removals actually stuck. dnf can report success while a package
+# returns as a dependency of something installed later, and a de-bloat that
+# silently leaves the software in place is worse than none: it makes a false
+# claim about what ships.
+still_present=()
+for package in "${REMOVE[@]+"${REMOVE[@]}"}"; do
+    if rpm -q "$package" >/dev/null 2>&1; then
+        still_present+=("$package")
+    fi
+done
+if [[ ${#still_present[@]} -gt 0 ]]; then
+    echo "apply-packages: these were listed for removal but are STILL INSTALLED:" >&2
+    for package in "${still_present[@]}"; do
+        echo "    ${package}  <- required by: $(rpm -q --whatrequires "$package" 2>/dev/null | tr '\n' ' ' || echo 'nothing (weak dependency?)')" >&2
+    done
+    echo >&2
+    echo "    A removal that does not remove is a false claim about what ships." >&2
+    echo "    If the package is dependency-locked into Plasma, PRD WP-02 says to" >&2
+    echo "    escalate and hide it rather than force it out (ADR-006's pattern for" >&2
+    echo "    konsole: hidden is not the same as removed)." >&2
+    exit 1
 fi
 
 for unit in "${MASK[@]+"${MASK[@]}"}"; do
