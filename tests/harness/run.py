@@ -34,7 +34,7 @@ if not __debug__:
         "  green result for a system it never checked."
     )
 
-SUITES = ("smoke", "security", "privacy", "screens", "stories")
+SUITES = ("smoke", "security", "privacy", "screens", "stories", "perf")
 
 
 def find_disk(arch: str) -> Path:
@@ -115,7 +115,16 @@ def main() -> int:
         help="capture screens and WRITE them as baselines instead of comparing "
         "(rule R-F: this is deliberate, and belongs in its own commit)",
     )
+    parser.add_argument(
+        "--only",
+        default=None,
+        help="perf only: enforce just this budget (idle_ram_mib or boot_seconds). "
+        "Both are always measured and recorded either way — a narrower gate must "
+        "not mean less evidence.",
+    )
     args = parser.parse_args()
+    if args.only and args.suite != "perf":
+        raise SystemExit("--only applies to the perf suite")
 
     disk = Path(args.disk) if args.disk else find_disk(args.arch)
     credentials = load_credentials()
@@ -137,7 +146,10 @@ def main() -> int:
         if args.baseline:
             _write_baselines(vm, credentials, module, args.baseline)
         else:
-            module.run(vm, credentials)
+            if args.suite == "perf":
+                module.run(vm, credentials, only=args.only)
+            else:
+                module.run(vm, credentials)
     except BaseException as exc:  # noqa: BLE001
         # BaseException, not Exception: SystemExit and KeyboardInterrupt would
         # otherwise escape and exit 0 with no verdict printed — and

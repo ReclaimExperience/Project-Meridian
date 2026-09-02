@@ -1,0 +1,26 @@
+# Launcher-visible desktop entries AFTER de-bloat (WP-02)
+#
+# 17 entries, down from 34. PRD 3.2 calls for ~12 visible apps, so this is
+# closer but not there: the remainder are entries the base marks visible that
+# belong to packages Plasma itself depends on, which WP-07 hides through KIOSK
+# rather than removing (ADR-006's konsole precedent: hidden is not removed).
+#
+# Format: owning-package|Name
+
+ark|Ark
+dolphin|Dolphin
+fcitx5-configtool|Keyboard layout viewer
+fcitx5-data|Fcitx 5
+fcitx5-data|Fcitx 5 Configuration
+gwenview|Gwenview
+haruna|Haruna
+kcalc|KCalc
+kmenuedit|Menu Editor
+konsole|Konsole
+kwrite|KWrite
+okular|Okular
+plasma-desktop|Emoji Selector
+plasma-systemmonitor|System Monitor
+plasma-systemsettings|KDE System Settings
+plasma-systemsettings|System Settings
+spectacle|Spectacle

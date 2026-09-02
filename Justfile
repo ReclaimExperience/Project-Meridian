@@ -143,6 +143,8 @@ test-lint:
     @python3 tests/harness/test_suite_guards.py
     @echo
     @python3 tests/harness/test_screendiff_stories.py
+    @echo
+    @python3 tests/harness/test_perf_gates.py
 
 # ------------------------------------------------------------------ build ---
 
@@ -449,9 +451,22 @@ baseline screen="all" arch="":
     [ "$arch" = "arm64" ] && arch=aarch64
     python3 tests/harness/run.py screens --arch "$arch" --baseline "{{ screen }}"
 
-# Perf gates: idle RAM and boot time (PRD 1.5)
-perf:
-    @just _todo WP-02 "perf"
+# Perf gates: idle RAM and boot time (PRD 2). One boot, both budgets.
+# `just perf idle_ram` / `just perf boot_time` enforce one; the default enforces
+# both. Every run measures and records both regardless — see tests/perf/.
+perf budget="" arch="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    arch="{{ arch }}"
+    [ -n "$arch" ] || arch="$(uname -m)"
+    [ "$arch" = "arm64" ] && arch=aarch64
+    case "{{ budget }}" in
+        "")          python3 tests/harness/run.py perf --arch "$arch" ;;
+        idle_ram)    tests/perf/idle_ram.sh --arch "$arch" ;;
+        boot_time)   tests/perf/boot_time.sh --arch "$arch" ;;
+        *) echo "just perf: unknown budget '{{ budget }}' (idle_ram, boot_time, or empty for both)" >&2
+           exit 2 ;;
+    esac
 
 # ----------------------------------------------------------------- assets ---
 

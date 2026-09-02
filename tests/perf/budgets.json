@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "PRD section 2's performance budgets. Rule R-E: budgets are laws — a gate is",
+    "never edited to make a build pass. If a change cannot meet one, the change",
+    "is wrong or the budget needs an ADR; both are decisions, not edits.",
+    "Gates are hard failures. Targets are what PRD 2 actually aims for: a run",
+    "between target and gate passes and says so, so drift is visible before it",
+    "becomes a breach."
+  ],
+  "idle_ram_mib": {
+    "gate": 1126,
+    "target": 950,
+    "conditions": "2-minute settle after GUI login, 4 GB VM (PRD 2)",
+    "note": "1.1 GiB = 1126 MiB. Measured as MemTotal - MemAvailable."
+  },
+  "boot_seconds": {
+    "gate": 15,
+    "target": 10,
+    "conditions": "cold boot, power-on to login screen, virtio SSD VM (PRD 2)",
+    "note": "Read from systemd's own firmware+loader+kernel+userspace total."
+  }
+}

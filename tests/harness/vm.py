@@ -24,6 +24,7 @@ import platform
 import shutil
 import signal
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -132,6 +133,7 @@ class VM:
     capture: bool = False  # write every guest packet to a pcap (ADR-011 audit)
     evidence: Path = field(default=None)  # type: ignore[assignment]
     _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
+    _started_at: float | None = field(default=None, init=False, repr=False)
     _qmp: QMP | None = field(default=None, init=False, repr=False)
     _console: Console | None = field(default=None, init=False, repr=False)
 
@@ -242,6 +244,11 @@ class VM:
             f"unix:{self.qmp_socket},server,nowait",
         ]
         print(f"vm: booting {self.disk.name} arch={self.arch} accel={accel}")
+        # Stamped immediately before exec so the perf suite measures the guest's
+        # boot rather than this process's setup. Host wall-clock is only ever a
+        # cross-check: the boot-time gate reads systemd's own timestamps, which
+        # do not move when a loaded CI runner is slow to fork qemu.
+        self._started_at = time.monotonic()
         self._process = subprocess.Popen(
             command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
         )
@@ -260,6 +267,13 @@ class VM:
         return "qemu said:\n  " + (self._process.stderr.read() or "").strip().replace(
             "\n", "\n  "
         )
+
+    @property
+    def uptime_seconds(self) -> float:
+        """Host wall-clock since qemu was exec'd."""
+        if self._started_at is None:
+            raise VMError("VM is not started")
+        return time.monotonic() - self._started_at
 
     @property
     def console(self) -> Console:

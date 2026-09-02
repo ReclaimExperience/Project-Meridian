@@ -30,6 +30,25 @@ add:
                           # upstream name; Fedora ships it as plasma-print-manager
                           # and `dnf install print-manager` fails outright.
 
+  # --- the fonts a Windows document arrives in (PRD 4.1, 6.2) --------------
+  #
+  # Metric-compatible substitutes, not lookalikes: each has the same character
+  # widths as the Microsoft font it stands in for, so a .docx Pat brings from the
+  # old machine keeps its line and page breaks. Without them every inherited
+  # document reflows on first open, which reads as "Linux broke my files" — the
+  # single most persona-damaging first impression available.
+  - liberation-sans-fonts   # Arial
+  - liberation-serif-fonts  # Times New Roman
+  - liberation-mono-fonts   # Courier New
+  - google-carlito-fonts    # Calibri — the default in every Office since 2007,
+                            # so this is the one that matters most.
+  - google-crosextra-caladea-fonts  # Cambria
+  # Fedora splits Liberation into three; there is no `liberation-fonts` to
+  # install. Noto (incl. CJK and emoji) is already in the base.
+  # Schibsted Grotesk, PRD 4.1's brand face, is not packaged in Fedora at all
+  # and has to be bundled — that belongs to WP-05's branding work, not here.
+  - rsms-inter-fonts        # Inter, PRD 4.1's UI face.
+
   # --- update machinery (ADR-008); WP-04 configures it ---------------------
   - greenboot                    # boot health checks -> automatic rollback
   - greenboot-default-health-checks
@@ -55,6 +74,23 @@ remove:
   - plasma-drkonqi     # ADR-011: no crash reporting of any kind. A crash dialogue
                        # offering to send a backtrace is exactly what pillar 5 says
                        # this system does not do.
+
+  - PackageKit-Qt6     # ADR-004 again: the PackageKit stack is not shipped.
+                       # Orphaned when plasma-discover went — nothing requires
+                       # it — but an unused package-management daemon is exactly
+                       # the second update path ADR-008 says must not exist.
+  - akonadi-server     # PRD 6.2 names the Akonadi/PIM stack. There is no mail,
+                       # calendar or contacts app in 3.2, so this is a MySQL
+                       # instance running for nothing — and idle RAM is a 1.1 GiB
+                       # gate, not a preference.
+  - ublue-os-just      # PRD 6.2's "ublue-branded extras". A library of `just`
+                       # recipes is a terminal surface, and INV-0 says nobody has
+                       # to open one. NOT touching ublue-os-akmods-addons,
+                       # -udev-rules or -signing: ADR-002 is explicit that the
+                       # driver stack stays, and it is why Pat's 2017 HP works.
+                       # ublue-os-update-services is also left alone deliberately
+                       # — it overrides rpm-ostreed and flatpak update timers, so
+                       # it collides with ADR-008, and WP-04 owns that decision.
 
   # --- PRD 3.2 leaves these out --------------------------------------------
   - plasma-welcome     # Named in 3.2's removal list. Also half of the double-OOBE

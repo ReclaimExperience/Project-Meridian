@@ -32,7 +32,12 @@ JUSTFILE = ROOT / "Justfile"
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 # Scripts under tests/ that are checks, and must therefore be invoked.
-CHECK_GLOBS = ("tests/lint/*.py", "tests/lint/*.sh", "tests/harness/test_*.py")
+CHECK_GLOBS = (
+    "tests/lint/*.py",
+    "tests/lint/*.sh",
+    "tests/harness/test_*.py",
+    "tests/perf/*.sh",
+)
 
 # Support code that is imported rather than invoked. Anything added here is a
 # claim that the file is not a check; keep it short and justified.
