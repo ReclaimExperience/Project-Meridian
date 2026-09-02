@@ -50,14 +50,29 @@ fi
 echo "::endgroup::"
 
 echo "::group::disk image"
-# bootc-image-builder refuses to run rootless, and CI podman is rootless, so the
-# image built by the runner user has to be handed to root's store first.
+# bootc-image-builder refuses to run rootless, so the image has to be in ROOT's
+# store before a disk can be made. CI now builds rootful for exactly this reason
+# and the image is already there — but check rather than assume, because the
+# fallback (an 8.7 GiB `podman save | sudo podman load`, 4m12s when it was
+# unconditional) is also the only thing that works if a caller built rootless.
+#
+# Assuming instead of checking would turn a rootless build into "image not
+# known", which surfaces four minutes later as a bootc-image-builder error about
+# a manifest rather than as "the image is in the wrong store".
+BRANDING=os/rootfs/usr/share/meridian/branding.json
+IMAGE="$(python3 -c "import json;d=json.load(open('${BRANDING}'));print(d['registry']['namespace']+'/'+d['registry']['image'])")"
+LOCAL_REF="${IMAGE}:testing-${ARCH}"
+
 if [[ "$(podman info --format '{{ .Host.Security.Rootless }}')" == "true" ]]; then
-    BRANDING=os/rootfs/usr/share/meridian/branding.json
-    IMAGE="$(python3 -c "import json;d=json.load(open('${BRANDING}'));print(d['registry']['namespace']+'/'+d['registry']['image'])")"
-    echo "  transferring ${IMAGE}:testing-${ARCH} into rootful storage"
-    podman save "${IMAGE}:testing-${ARCH}" | sudo podman load
     SUDO=(sudo -E env "PATH=${PATH}")
+    if "${SUDO[@]}" podman image exists "${LOCAL_REF}"; then
+        echo "  ${LOCAL_REF} is already in rootful storage; no transfer needed"
+    else
+        echo "  ${LOCAL_REF} is only in the rootless store — transferring."
+        echo "  This copies ~8.7 GiB and takes about four minutes. It happens"
+        echo "  when the image was built rootless; CI builds rootful to skip it."
+        podman save "${LOCAL_REF}" | sudo podman load
+    fi
 else
     SUDO=()
 fi

@@ -33,6 +33,14 @@ echo "probing for account: ${ACCOUNT}"
 echo "checking published image for test access: ${REF}"
 # Only reach for the registry when the image is not already here: `podman pull`
 # on a present tag still round-trips, which hangs a local run for no reason.
+#
+# In CI this now genuinely fetches the PUSHED image, which is what this check
+# always claimed to do. It did not before: CI built rootless as the same user
+# that ran this, so `image exists` was true and the local build was probed while
+# the comment above the workflow step said "not from a local build of it". The
+# build moved to root's store to skip an 8.7 GiB copy, and the side effect is
+# that this check became honest. The pull it now performs is the price of that,
+# and it is the right price — a published image nobody fetched is unverified.
 if ! podman image exists "$REF" 2>/dev/null; then
     if ! podman pull -q "$REF" >/dev/null 2>&1; then
         # Exit 1, not whatever podman returned: a non-zero status here means

@@ -42,11 +42,12 @@ jobs:
       - name: Prepare runner storage
         run: bash ci/prepare-runner.sh
 
+      # Rootful, because the BUILD is rootful — see "Build and push".
       - name: Log in to GHCR
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         run: |
           # --password-stdin: a token passed as -p is visible in /proc.
-          echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
+          echo '${{ secrets.GITHUB_TOKEN }}' | sudo podman login ghcr.io -u '${{ github.actor }}' --password-stdin
 
       # PR images go to a throwaway pr-NNN tag; main goes to :testing. Nothing
       # here ever writes :stable — that is the weekly promote gate's job (7.5).
@@ -66,17 +67,27 @@ jobs:
       # Fork PRs get no GHCR credentials, so they build without pushing. ADR-014
       # makes this repo public, so fork PRs are a real path, not a hypothetical —
       # they must not fail on a push they were never able to perform.
+      # Built ROOTFUL, and that is the whole point. bootc-image-builder refuses
+      # to run rootless, so a rootless build has to be handed to root's store
+      # before a disk image can be made — `podman save | sudo podman load` of an
+      # 8.7 GiB stream, measured at 4m12s of a 25-minute job to move bytes that
+      # were already on the disk. Building where the disk builder will look for
+      # it costs nothing and removes the copy.
+      #
+      # `sudo env PATH=...` rather than `sudo -E`: `just` comes from setup-just
+      # on the runner's PATH, but carrying the whole environment would also hand
+      # root the runner user's HOME and therefore its containers.conf.
       - name: Build and push
         env:
           CAN_PUSH: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           set -euo pipefail
           if [ "$CAN_PUSH" = "true" ]; then
-            bash ci/build.sh ${{ matrix.arch }} --push '${{ steps.tag.outputs.tag }}'
+            sudo env "PATH=${PATH}" bash ci/build.sh ${{ matrix.arch }} --push '${{ steps.tag.outputs.tag }}'
           else
             echo "Fork pull request: building without pushing (no registry credentials)."
             echo "The pushed-label check therefore does not run for this PR."
-            bash ci/build.sh ${{ matrix.arch }}
+            sudo env "PATH=${PATH}" bash ci/build.sh ${{ matrix.arch }}
           fi
 
       # PRD 7.3's vm-test row. `smoke`, `security` and `perf` gate a PR:
