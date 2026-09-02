@@ -30,7 +30,11 @@ jobs:
           pipx install "ruff==${RUFF_VERSION}"
           # PyYAML is imported by tests/lint/schemas.py and the parser test.
           # It happens to be present on the hosted image; do not rely on that.
-          python3 -m pip install --quiet --break-system-packages jsonschema PyYAML
+          # pillow and numpy are needed by the screendiff/stories guard in
+          # `just test-lint`. The version pins in ci/tool-versions.env cover
+          # the three CLI linters but not Python packages — which is how
+          # this job went red on a commit that was green locally.
+          python3 -m pip install --quiet --break-system-packages jsonschema PyYAML pillow numpy
           npm install -g "markdownlint-cli@${MARKDOWNLINT_VERSION}" >/dev/null
 
       - name: Lint
