@@ -6,27 +6,36 @@
 #
 # Date: 2026-09-02
 #
-#   rpms               2045  ->   2040   (-5)
-#   desktop entries     192  ->    180   (-12)
+#   rpms               2045  ->   2037   (-8)
+#   desktop entries     192  ->    178   (-14)
 #   enabled units        85  ->     84   (-1)
 #   launcher-visible     34  ->     17   (-17)
 #
-# The rpm count barely moves, and that is expected rather than disappointing:
-# PRD 3.2's target is what Pat SEES, and the removals are leaf applications
-# while the 2,000 packages underneath are the driver, codec and font stack
-# ADR-002 exists to keep. Removing those is how you break someone's printer.
-# The number that matters is launcher-visible.
-
-### summary: packages gone (32)
+# The rpm total barely moves, and that is the correct outcome rather than a
+# disappointing one. PRD 3.2's target is what Pat SEES: the removals are leaf
+# applications, while the two thousand packages underneath are the driver, codec
+# and font stack ADR-002 exists to preserve. Removing those is how a printer
+# stops working three weeks later. The number that matters is launcher-visible.
 #
-# 21 named in os/packages.yml, the rest their dependents. Every line here was
-# an explicit removal or a consequence apply-packages.sh printed at build time.
+# The count also went UP by the six font packages, deliberately: Liberation,
+# Carlito and Caladea are metric-compatible substitutes for Arial, Calibri and
+# Cambria, so documents brought from Windows keep their line and page breaks.
+# `fc-match Calibri` resolves to Carlito in this image.
+
+### summary: packages gone (38)
+#
+# 23 named in os/packages.yml; the rest are dependents apply-packages.sh
+# printed at build time, each one a companion of something listed above it.
+  akonadi-server
+  akonadi-server-mysql
   filelight
   firefox
   firefox-langpacks
   firewall-config
+  fzf
   htop
   hwloc-libs
+  just
   kate
   kate-krunner-plugin
   kate-plugins
@@ -53,12 +62,16 @@
   plasma-drkonqi
   plasma-setup
   plasma-welcome
+  powerstat
+  ublue-os-just
 
-### summary: packages added (27)
+### summary: packages added (30)
   cfitsio
   compat-lua-libs
   djvulibre-libs
   ebook-tools-libs
+  google-carlito-fonts
+  google-crosextra-caladea-fonts
   greenboot
   greenboot-default-health-checks
   gwenview
@@ -80,6 +93,7 @@
   okular
   okular-libs
   okular-part
+  rsms-inter-fonts
   uchardet
   vapoursynth-libs
 
@@ -123,8 +137,6 @@ adwaita-icon-theme-legacy-46.2-7.fc44.noarch
 adwaita-mono-fonts-50.0-1.fc44.noarch
 adwaita-sans-fonts-50.0-1.fc44.noarch
 aha-0.5.1-16.fc44.x86_64
-akonadi-server-26.08.0-1.fc44.x86_64
-akonadi-server-mysql-26.08.0-1.fc44.x86_64
 alsa-firmware-1.2.4-17.fc44.noarch
 alsa-lib-1.2.16.1-1.fc44.x86_64
 alsa-sof-firmware-2025.12.2-1.fc44.noarch
@@ -476,7 +488,6 @@ fwupd-efi-1.8-1.fc44.x86_64
 fwupd-plugin-modem-manager-2.1.7-1.fc44.x86_64
 fwupd-plugin-uefi-capsule-data-2.1.7-1.fc44.x86_64
 fxload-2008_10_13-34.fc44.x86_64
-fzf-0.74.3-1.fc44.x86_64
 game-music-emu-0.6.4-3.fc44.x86_64
 gamemode-1.8.2-4.fc44.x86_64
 gawk-5.3.2-3.fc44.x86_64
@@ -525,6 +536,8 @@ gnutls-3.8.13-1.fc44.x86_64
 gnutls-dane-3.8.13-1.fc44.x86_64
 gobject-introspection-1.86.0-3.fc44.x86_64
 gocryptfs-2.6.1-5.fc44.x86_64
+google-carlito-fonts-1.103-0.28.20130920.fc44.noarch
+google-crosextra-caladea-fonts-1.002-0.22.20130214.fc44.noarch
 google-droid-sans-fonts-20200215-24.fc44.noarch
 google-noto-color-emoji-fonts-20250623-4.fc44.noarch
 google-noto-emoji-fonts-20250623-4.fc44.noarch
@@ -715,7 +728,6 @@ jq-1.8.1-3.fc44.x86_64
 json-c-0.18-8.fc44.x86_64
 json-glib-1.10.8-5.fc44.x86_64
 jsoncpp-1.9.6-3.fc44.x86_64
-just-1.57.0-1.fc44.x86_64
 kaccounts-integration-qt6-26.08.0-1.fc44.x86_64
 kaccounts-providers-26.08.0-1.fc44.x86_64
 kactivitymanagerd-6.7.4-1.fc44.x86_64
@@ -1675,7 +1687,6 @@ poppler-utils-26.01.0-3.fc44.x86_64
 popt-1.19-10.fc44.x86_64
 portaudio-19.7.0-3.fc44.x86_64
 powerdevil-6.7.4-1.fc44.x86_64
-powerstat-0.04.05-3.fc44.x86_64
 ppp-2.5.1-7.fc44.x86_64
 prefixdevname-0.2.0-8.fc44.x86_64
 printer-driver-brlaser-6.2.7-3.fc44.x86_64
@@ -1862,6 +1873,7 @@ rpm-plugin-audit-6.0.2-1.fc44.x86_64
 rpm-plugin-selinux-6.0.2-1.fc44.x86_64
 rpm-sequoia-1.10.2-4.fc44.x86_64
 rpm-sign-libs-6.0.2-1.fc44.x86_64
+rsms-inter-fonts-4.1-3.fc44.noarch
 rsync-3.5.0-1.fc44.x86_64
 rtkit-0.11-70.fc44.x86_64
 rubberband-libs-4.0.0-5.fc44.x86_64
@@ -1984,7 +1996,6 @@ twolame-libs-0.4.0-9.fc44.x86_64
 tzdata-2026c-1.fc44.noarch
 uavs3d-libs-1.2.0~20251213git0e20d2c-8.fc44.x86_64
 ublue-os-akmods-addons-0.8-1.fc44.noarch
-ublue-os-just-0.57-3.fc44.noarch
 ublue-os-luks-0.3-1.fc44.noarch
 ublue-os-signing-0.5-1.fc43.noarch
 ublue-os-udev-rules-0.10-1.fc44.noarch
@@ -2254,8 +2265,6 @@ org.freedesktop.Xwayland.desktop
 org.freedesktop.impl.portal.desktop.kde.desktop
 org.gnupg.pinentry-qt.desktop
 org.kde.ConfigurePrinter.desktop
-org.kde.akonadi.configdialog.desktop
-org.kde.akonadi.desktop
 org.kde.ark.desktop
 org.kde.baloorunner.desktop
 org.kde.bluedevilsendfile.desktop
