@@ -251,7 +251,37 @@ fi
 
 if [[ ${#REMOVE[@]} -gt 0 ]]; then
     echo "apply-packages: removing ${REMOVE[*]}"
+    # Snapshot first. `dnf remove` takes everything that DEPENDS on a package
+    # with it, so a one-line removal can silently delete the desktop: removing
+    # kmenuedit took plasma-desktop, plasma-workspace and sddm, and the build
+    # reported success. Verifying that the listed packages are gone does not
+    # catch that — it is the UNLISTED casualties that matter.
+    before_removal="$(mktemp)"
+    rpm -qa --qf '%{NAME}\n' | sort -u > "$before_removal"
+
     dnf -y remove "${REMOVE[@]}"
+
+    after_removal="$(mktemp)"
+    rpm -qa --qf '%{NAME}\n' | sort -u > "$after_removal"
+
+    wanted="$(mktemp)"
+    printf '%s\n' "${REMOVE[@]}" | sort -u > "$wanted"
+
+    collateral="$(comm -23 <(comm -23 "$before_removal" "$after_removal") "$wanted")"
+    rm -f "$before_removal" "$after_removal" "$wanted"
+
+    if [[ -n "$collateral" ]]; then
+        echo >&2
+        echo "apply-packages: removal took packages that were NOT listed:" >&2
+        printf '%s\n' "$collateral" | sed 's/^/    /' >&2
+        echo >&2
+        echo "    dnf removes everything that depends on a package. One of the" >&2
+        echo "    entries in packages.yml is dependency-locked, and forcing it out" >&2
+        echo "    took these with it." >&2
+        echo "    PRD WP-02: 'Escalate if a 3.2 removal is dependency-locked into" >&2
+        echo "    Plasma (document, propose substitute, wait).' Do not force it." >&2
+        exit 1
+    fi
 fi
 
 # Prove the removals actually stuck. dnf can report success while a package

@@ -73,7 +73,13 @@ remove:
   - kinfocenter        # Not in 3.2. Settings -> About covers what Pat needs.
   - khelpcenter        # Not in 3.2. Our help is docs/help (WP-25), written for
                        # this product rather than for KDE in general.
-  - kmenuedit          # Not in 3.2, and the Start menu is KIOSK-locked (WP-07).
+  # kmenuedit is NOT here: it is a hard dependency of plasma-desktop, and
+  # removing it takes plasma-desktop, plasma-workspace and sddm with it — an
+  # image with no desktop and no login screen, built successfully. PRD WP-02
+  # says to escalate a dependency-locked removal rather than force it, so it is
+  # escalated (DECISION-NEEDED) and stays installed for now. ADR-006's konsole
+  # precedent — hidden is not the same as removed — is the likely substitute,
+  # and hiding belongs to WP-07's KIOSK work.
   - kfind              # Not in 3.2. Search is the Start menu (ADR-016).
   - kcharselect        # Not in 3.2. Meta+. is the emoji picker (Appendix D).
   - kdebugsettings     # Not in 3.2. A developer tool in a consumer launcher.
