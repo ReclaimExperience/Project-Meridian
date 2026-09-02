@@ -708,10 +708,19 @@ Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
 
 **NOT done — WP-02 is not DONE until these land:**
 
-- **Idle RAM is unmeasured.** The gate exists and is enforced, but no number has
-  been produced: it needs a VM, and the build host's sudo is password-gated. The
-  first measurement comes from PR #31's CI. If it exceeds 1.1 GiB, escalate (the
-  WP says so explicitly) — do not adjust `budgets.json` (R-E).
+- **Idle RAM is 1448.2 MiB against the 1126 MiB gate — over by 322 MiB.**
+  Escalated as issue #32, not hidden and not accommodated by moving the budget
+  (R-E). Boot time passes at 11.0 s (gate 15 s). Baloo is masked, Akonadi is
+  gone and `systemctl --failed` is empty, so this is what the base costs rather
+  than a runaway. **Where it goes is not yet known**: the per-process and
+  per-cgroup breakdown is committed and captured on every run, but no run has
+  produced it — see the CI blocker below.
+- **CI is producing no workflow runs at all.** Since 21:39 on 2026-09-02, four
+  pushes and a deliberate empty commit created zero runs — not cancelled, never
+  created. Actions reports enabled, no concurrency guard, no path filters;
+  diagnosing further needs `admin:org`. With the build host also unable to make
+  a disk image (bootc-image-builder needs rootful podman, sudo is
+  password-gated), **no VM measurement of any kind can be taken right now.**
 - Launcher screenshot for the 3.2 visible-set acceptance.
 - `systemctl --failed` empty is asserted by `smoke`, not yet confirmed on this image.
 
