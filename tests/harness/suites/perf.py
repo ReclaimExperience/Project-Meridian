@@ -167,6 +167,34 @@ def measure(vm: VM, credentials: dict) -> dict:
         )
     used_mib = (fields["MemTotal"] - fields["MemAvailable"]) / 1024
 
+    # --- where the memory went -----------------------------------------------
+    #
+    # Captured on every run, not only on failure. "Idle RAM is 1448 MiB" is a
+    # number; "user.slice holds 900 MiB and the top process is X" is something a
+    # work package can act on. Collecting it only when the gate trips means the
+    # first over-budget run has to be repeated before anyone can start.
+    _status, by_process = console.run(
+        "ps -eo rss=,comm= --sort=-rss | head -20", timeout=60
+    )
+    _status, by_slice = console.run(
+        "for s in user.slice system.slice init.scope; do "
+        "printf '%s %s\\n' \"$s\" "
+        '"$(cat /sys/fs/cgroup/$s/memory.current 2>/dev/null || echo 0)"; done',
+        timeout=60,
+    )
+    top = []
+    for line in by_process.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            top.append(
+                {"mib": round(int(parts[0]) / 1024, 1), "comm": parts[1].strip()}
+            )
+    slices = {}
+    for line in by_slice.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1].isdigit():
+            slices[parts[0]] = round(int(parts[1]) / 1024 / 1024, 1)
+
     return {
         "idle_ram_mib": round(used_mib, 1),
         "mem_total_mib": round(fields["MemTotal"] / 1024, 1),
@@ -175,6 +203,8 @@ def measure(vm: VM, credentials: dict) -> dict:
         "wall_clock_to_console_seconds": round(wall_clock_to_console, 2),
         "settle_seconds": SETTLE_SECONDS,
         "systemd_analyze_raw": analyze.strip(),
+        "top_processes_mib": top[:20],
+        "cgroup_slices_mib": slices,
     }
 
 
@@ -194,6 +224,10 @@ def run(vm: VM, credentials: dict, only: str | None = None) -> None:
     }
     print(f"perf: boot breakdown {results['boot_breakdown']}")
     print(f"perf: RAM measured in a {results['mem_total_mib']:.0f} MiB VM")
+    if results.get("cgroup_slices_mib"):
+        print(f"perf: by slice {results['cgroup_slices_mib']}")
+    for entry in results.get("top_processes_mib", [])[:12]:
+        print(f"perf:   {entry['mib']:>7.1f} MiB  {entry['comm']}")
 
     failures = []
     for key, (label, measured, unit) in checks.items():
