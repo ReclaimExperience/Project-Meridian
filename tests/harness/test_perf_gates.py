@@ -138,6 +138,21 @@ def main() -> int:
     else:
         print("  ok    budgets.json matches PRD 2")
 
+    # run.py writes the per-run verdict as "<suite>-<arch>.json". A suite that
+    # writes its own report under that same name is overwritten by the runner,
+    # and the loss is silent - the file exists, with the wrong contents. The
+    # first over-budget run lost its whole memory breakdown to this.
+    print("\nevidence filenames must not collide with the runner's")
+    suites = ROOT / "tests" / "harness" / "suites"
+    for path in sorted(suites.glob("*.py")):
+        name = path.stem
+        source = path.read_text()
+        if f'write_report(f"{name}-{{vm.arch}}"' in source:
+            print(f"  FAIL  {name}.py writes '{name}-<arch>.json', which run.py")
+            print("      overwrites with its own verdict. Pick another name.")
+            failures += 1
+    print("  ok    no suite writes under the runner's report name")
+
     print()
     if failures:
         print(f"perf-gates: {failures} failure(s)")

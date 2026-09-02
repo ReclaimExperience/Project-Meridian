@@ -237,6 +237,10 @@ def run(vm: VM, credentials: dict, only: str | None = None) -> None:
         if not ok and (only is None or only == key):
             failures.append(f"{label}: {message}")
 
-    vm.write_report(f"perf-{vm.arch}", results)
+    # NOT "perf-<arch>": run.py writes the per-run verdict under
+    # "<suite>-<arch>.json", so that name collides and the runner's report - the
+    # one written last - silently replaced every measurement this suite took.
+    # The first over-budget run lost its own breakdown that way.
+    vm.write_report(f"perf-budgets-{vm.arch}", results)
     if failures:
         raise AssertionError("\n".join(failures))
