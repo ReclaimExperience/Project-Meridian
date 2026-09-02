@@ -109,8 +109,13 @@ protect:
   - plasma-desktop     # Without this there is no Plasma session at all.
   - plasma-workspace
   - kwin               # The compositor. No kwin, no windows.
-  - sddm               # No login screen means no way in, on a machine with no
-                       # terminal by design (INV-0).
+  - plasma-login-manager  # The login screen. Fedora 44 / Plasma 6.7 replaced
+                          # SDDM with plasmalogin, and `sddm` is not installed at
+                          # all — display-manager.service is an alias for
+                          # plasmalogin.service. "sddm" here protected nothing
+                          # while reading as protection. No login screen means no
+                          # way in, on a machine with no terminal by design
+                          # (INV-0).
 
   # --- the things Pat's first hour depends on -------------------------------
   - NetworkManager     # Wi-Fi. ADR-002's whole point is that hardware works.

@@ -158,6 +158,22 @@ def run_script(manifest: Path, bindir: Path, log: Path) -> tuple[int, str, str]:
     env = dict(os.environ)
     env["PATH"] = f"{bindir}:{env['PATH']}"
     env["STUB_LOG"] = str(log)
+
+    # These cases ask one question: which packages does the script act on? The
+    # rpm database just has to be consistent with a successful run, so it holds
+    # the protected packages (installed, and they survive) and none of the
+    # removals (already gone, so nothing lingers). Removal SEMANTICS — cascades,
+    # survivors, vacuous protection — are the cascade suite's job, with a stub
+    # that mutates this database for real.
+    db = bindir.parent / "rpmdb-canonical"
+    try:
+        declared = yaml.safe_load(manifest.read_text()) or {}
+        protect = declared.get("protect") or []
+    except (yaml.YAMLError, AttributeError):
+        protect = []
+    db.write_text("".join(f"{p}\n" for p in protect))
+    env["RPM_DB"] = str(db)
+
     if log.exists():
         log.unlink()
     result = subprocess.run(
@@ -256,6 +272,19 @@ CASCADES = {
         "",  # no cascade, and the stub is told to remove nothing
         True,
         "STILL installed",
+    ),
+    "a protect entry that is not installed must fail the build": (
+        (
+            "version: 1\nadd: []\nremove: [firefox]\n"
+            "protect: [plasma-desktop, sddm]\nsystemd:\n  mask: []\n  disable: []\n"
+        ),
+        # sddm is absent — exactly the real case: Fedora 44 replaced it with
+        # plasma-login-manager, so the entry guarded nothing and read as though
+        # it did.
+        ["firefox", "plasma-desktop"],
+        "",
+        True,
+        "not installed",
     ),
     "removing without a protect list must fail closed": (
         (

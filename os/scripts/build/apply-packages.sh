@@ -273,6 +273,26 @@ if [[ ${#REMOVE[@]} -gt 0 ]]; then
     before_removal="$(mktemp)"
     rpm -qa --qf '%{NAME}\n' | sort -u > "$before_removal"
 
+    # A protect entry for a package that is not installed protects NOTHING, and
+    # reads in review as though it does. "sddm" sat in this list while Fedora 44
+    # had already replaced it with plasma-login-manager: the login screen was
+    # unguarded and the list looked complete. Check before relying on it.
+    protect_missing=()
+    for candidate in "${PROTECT[@]}"; do
+        if ! grep -qx "$candidate" "$before_removal"; then
+            protect_missing+=("$candidate")
+        fi
+    done
+    if [[ ${#protect_missing[@]} -gt 0 ]]; then
+        echo >&2
+        echo "apply-packages: 'protect:' names packages that are not installed:" >&2
+        printf '    %s\n' "${protect_missing[@]}" >&2
+        echo "    Nothing can take them away, so they guard nothing while looking" >&2
+        echo "    like they do. Either the base renamed the package or the entry is" >&2
+        echo "    a typo. Fix the name; do not delete the entry." >&2
+        exit 1
+    fi
+
     dnf -y remove "${REMOVE[@]}"
 
     after_removal="$(mktemp)"
