@@ -18,7 +18,7 @@ Status: `TODO` | `IN PROGRESS` | `BLOCKED` | `DONE` | `WAIVED`
 | WP | Title | Phase | Size | Risk | Depends | Status |
 |---|---|---|---|---|---|---|
 | WP-00 | Repository bootstrap & conventions | 0 | S | low | none | DONE |
-| WP-01 | Base image: builds, boots, publishes | 0 | M | medium (external base) | WP-00 | IN PROGRESS |
+| WP-01 | Base image: builds, boots, publishes | 0 | M | medium (external base) | WP-00 | DONE |
 | WP-02 | De-bloat & package curation | 0 | M | low | WP-01 | TODO |
 | WP-03 | VM test harness & story framework | 0 | L | medium | WP-01 (images to test) | TODO |
 | WP-04 | Update pipeline, rollback, signing | 0 | M | medium | WP-01 | TODO |
@@ -134,7 +134,7 @@ Its pre-authorized split-base applies and **no escalation is required**:
 `stable-*` family last touched in 2023, though `:44` does resolve. Pin
 deliberately and record which scheme is authoritative.
 
-## WP-01 Base image: builds, boots, publishes — IN PROGRESS 2026-09-01 (agent run 1)
+## WP-01 Base image: builds, boots, publishes — DONE 2026-09-02 (agent run 1)
 
 **Delivered:** `os/Containerfile` (ARG-switched split base, branding-templated labels);
 `os/packages.yml` + schema + `apply-packages.sh`; `gen-os-release.sh`;
@@ -157,38 +157,35 @@ password field, because the qcow2 has no user account. The acceptance item says
 target comes up and a session starts. The greeter itself needs a user account and
 is re-checked after WP-02 removes `plasma-welcome` (PRD 3.2).
 
-**NOT yet verified — this WP is not done:**
+**Acceptance — all four items met:**
 
-- **x86_64 boot.** The x86_64 image itself now builds locally and inspects clean
-  (see below), but it has never been booted. `just vm-image x86_64` **cannot**
-  run on the Apple Silicon dev machine: bootc-image-builder runs podman inside
-  itself and the nested podman fails under emulation with `failed to open 2048
-  locks in /libpod_lock: numerical result out of range`, with and without
-  `--ipc=host`. `just build` cross-builds fine; only the DISK image step cannot.
-  The recipe now says so instead of failing obscurely. PRD 7.2 already makes CI
-  the authoritative x86_64 loop — this is the concrete reason. Booting it needs
-  WP-03's harness on an x86_64 runner.
-- **SDDM login greeter** — see the correction above. A graphical session starts;
-  the greeter has not been shown.
-- `just vm-run x86_64` has never been executed. Until this review it also passed
-  no UEFI firmware and would have booted SeaBIOS against a UEFI qcow2; firmware
-  resolution is now shared by both arches but the x86_64 boot remains unverified.
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | `verify-base.sh` output committed | `os/scripts/build/verify-base.latest.txt`; decision `split-base`, machine-readable in `os/base-images.env` |
+| 2 | build → vm-image → vm-run reaches the SDDM greeter, aarch64 locally and x86_64 in CI | `docs/qa/evidence/wp-01-sddm-greeter-{aarch64,x86_64}.png` — user listed, password field, power actions. 216 units OK locally, 248 in CI, **zero** unit failures on both |
+| 3 | `skopeo inspect` of the **pushed** image shows our labels | verified anonymously (no credentials) against `pr-28-x86_64` and `pr-28-aarch64`; base.name correctly differs per arch |
+| 4 | both-arch CI green | `lint`, `build-x86_64`, `build-aarch64` all green |
 
-**Now proven (2026-09-01, after `gh auth login`):**
+**What it took to reach the greeter (two blockers, only the first obvious):** the
+disk image had no user account, so SDDM had nobody to offer — and an account
+alone is not enough, because Plasma ships its own OOBE as `plasma-setup.service`
+with `Before=display-manager.service`, which preempts SDDM entirely until
+`/etc/plasma-setup-done` exists. The original screenshot was not a boot failure;
+it was a wizard standing in front of the greeter. Both are disk-image-only
+customizations, so the published container image is untouched and PRD 7.4's
+no-test-credentials rule holds.
 
-- Both arches build, push and verify their labels in CI. `skopeo inspect` of the
-  **pushed** x86_64 image reports `base.name=ghcr.io/ublue-os/kinoite-main:44`,
-  confirming the ADR-002 split base is real on both sides, not just on paper.
-- Free `ubuntu-24.04-arm` runners are available to this repo, resolving the
-  PRD 7.3 `[VERIFY]`. Record the fallback (qemu cross-build, nightly only) as
-  unused.
-- x86_64 first failed with "no space left on device": hosted runners have ~14 GB
-  on `/` and the ublue base does not fit. `ci/prepare-runner.sh` moves the
-  container store to `/mnt`. aarch64 had passed only because the Fedora Kinoite
-  dev base is smaller — luck, not headroom — so it runs for both arches.
-- Lint tool versions are pinned in `ci/tool-versions.env`. CI was installing
-  Ubuntu's shellcheck 0.9.0 while the dev machine had 0.11.0, so `just lint` was
-  green locally and red in CI on the same commit — a direct violation of PRD 7.1.
+**FOR WP-02 AND WP-14:** the shipped image still carries `plasma-setup` and
+`plasma-welcome`. Left alone, a real user meets Plasma's OOBE *before* ours
+(PRD 5.8) — two wizards, ours second. Suppressing Plasma's belongs to package
+curation and to our own Welcome.
+
+**`[VERIFY]` answered for WP-03 (PRD 7.3):** `/dev/kvm` **is present and usable**
+on `ubuntu-latest`, shipped as `crw-rw---- root:kvm` and usable after
+`sudo chmod 666 /dev/kvm`. WP-03 can plan on KVM rather than the 3×-timeout TCG
+fallback — worth knowing before designing every later suite around the slow path.
+Free `ubuntu-24.04-arm` runners also work, so the qemu cross-build fallback is
+unused.
 
 **Deviations:**
 
@@ -384,3 +381,39 @@ x86_64 harness and ISO work around CI runners, not the Mac dev loop.
 under emulation despite CI having already built and pushed exactly it. Making the
 package public would let later WPs pull CI artifacts instead of re-emulating
 them.
+
+## WP-01 closed — 2026-09-02
+
+Acceptance is complete; the table in the WP-01 entry lists the evidence for each
+item. Two things that were open are now closed rather than waived: the SDDM
+greeter (both arches) and the x86_64 boot.
+
+`ci/boot-screenshot.sh` + `ci/qmp-screenshot.py` are a **WP-01 stopgap** — a
+one-off photograph, no assertions, no baselines, no story scripts. **WP-03 should
+delete both** when the real harness (PRD 7.4) lands, not grow them; two
+half-harnesses is worse than one.
+
+Getting the x86_64 boot working in CI took five attempts, each producing a
+finding worth keeping:
+
+1. the boot step ran before the image was built;
+2. `/dev/kvm` is `root:kvm` and needs `chmod` before it is usable;
+3. bootc-image-builder refuses rootless podman, so the image must be handed to
+   root's store — whose graphroot is on the runner's 14 GB root disk;
+4. relocating that graphroot via `storage.conf` broke the nested podman
+   (`database static dir ... does not match`), so the bytes move by **bind
+   mount** while the canonical path stays;
+5. `FW=$(find ... | head -1)` under `set -o pipefail` aborted the script
+   silently when a search root was missing — **the same defect already fixed
+   once in the Justfile's `vm-run`, reintroduced in a new file.** shellcheck
+   does not flag it.
+
+Finding 5 is the one to remember: the fix was applied where it was found, not to
+the pattern. Any `$(cmd | cmd)` under `pipefail` is a silent-abort candidate.
+
+Open, and deliberately not WP-01's to close:
+
+- `just vm-image` cannot cross-build a disk image (nested podman under
+  emulation). WP-03 and WP-16 must plan x86_64 disk/ISO work around CI runners.
+- No installable ISO exists yet — that is WP-16. Bare-metal testing on real
+  hardware begins there and at WP-17/WP-25, not here.
