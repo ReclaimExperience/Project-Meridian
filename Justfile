@@ -24,7 +24,7 @@ _todo wp target:
 # ------------------------------------------------------------------- lint ---
 
 # Full lint suite (PRD 6.3). Green from day one — this is WP-00's acceptance.
-lint: lint-toolchain lint-shell lint-justfile lint-python lint-schemas lint-branding lint-strings lint-codeowners lint-markdown
+lint: lint-toolchain lint-wired lint-shell lint-justfile lint-workflows lint-python lint-schemas lint-branding lint-strings lint-codeowners lint-markdown
     @echo
     @echo "lint: all checks passed"
 
@@ -74,10 +74,20 @@ lint-shell:
     shellcheck "${files[@]}"
     echo "  lint-shell: ${#files[@]} script(s) clean"
 
+# every check that exists must actually be invoked by something — the outermost
+# form of a vacuous pass is a guard nothing calls
+lint-wired:
+    @python3 tests/lint/wired.py
+
 # shellcheck the bash embedded in Justfile recipes — the largest unlinted
 # shell surface in the repo, and where every shell defect so far has lived.
 lint-justfile:
     @python3 tests/lint/justfile_shell.py
+
+# shellcheck the inline run: blocks in GitHub workflows — the shell surface left
+# over after the logic was extracted into ci/*.sh
+lint-workflows:
+    @python3 tests/lint/workflow_shell.py
 
 # ruff over every tracked Python file
 lint-python:
@@ -127,6 +137,12 @@ test-lint:
     @./tests/lint/test_strings_lint.sh
     @echo
     @python3 tests/lint/test_packages_parser.py
+    @echo
+    @python3 tests/harness/test_pcap.py
+    @echo
+    @python3 tests/harness/test_suite_guards.py
+    @echo
+    @python3 tests/harness/test_screendiff_stories.py
 
 # ------------------------------------------------------------------ build ---
 
@@ -271,7 +287,7 @@ vm-image arch="x86_64":
     # credentials — holds. The password is generated per build and printed once;
     # nothing is committed. WP-03 replaces this with its transient boot-time
     # credential injection.
-    devpass="$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')"
+    devpass="${MERIDIAN_DEV_PASSWORD:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')}"
     conf="$(mktemp -d)/config.toml"
     cat > "$conf" <<TOML
     [[customizations.user]]
@@ -284,6 +300,13 @@ vm-image arch="x86_64":
     data = "dev disk image only - see Justfile\n"
     TOML
     sed -i'' -e 's/^    //' "$conf"
+
+    # The harness needs this credential to use the console channel, so record it
+    # beside the image rather than only printing it. build/ is gitignored and the
+    # account exists in this disk image alone.
+    mkdir -p build
+    printf '{"user": "mtest", "password": "%s"}\n' "${devpass}" > build/dev-credentials.json
+    chmod 600 build/dev-credentials.json
 
     echo "building qcow2 from ${tag}"
     echo "  dev login: mtest / ${devpass}   (this disk image only; never published)"
@@ -395,13 +418,25 @@ vm-run-iso:
 
 # ------------------------------------------------------------------- test ---
 
-# Run a harness suite: smoke | stories | screens | perf | security | privacy
-vm-test suite="smoke":
-    @just _todo WP-03 "vm-test {{ suite }}"
+# Run a harness suite (PRD 7.4). Currently: smoke
+vm-test suite="smoke" arch="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    arch="{{ arch }}"
+    [ -n "$arch" ] || arch="$(uname -m)"
+    [ "$arch" = "arm64" ] && arch=aarch64
+    python3 tests/harness/run.py "{{ suite }}" --arch "$arch"
 
-# Re-baseline one screenshot, deliberately (PRD 7.4, rule R-F)
-baseline screen:
-    @just _todo WP-03 "baseline {{ screen }}"
+# Re-baseline screenshots, deliberately (PRD 7.4, rule R-F).
+# screen: a screen name, or "all". Commit the result on its own, with a
+# STATUS.md note — a baseline that changes quietly is a regression that passed.
+baseline screen="all" arch="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    arch="{{ arch }}"
+    [ -n "$arch" ] || arch="$(uname -m)"
+    [ "$arch" = "arm64" ] && arch=aarch64
+    python3 tests/harness/run.py screens --arch "$arch" --baseline "{{ screen }}"
 
 # Perf gates: idle RAM and boot time (PRD 1.5)
 perf:

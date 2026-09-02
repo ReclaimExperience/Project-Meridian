@@ -20,7 +20,7 @@ Status: `TODO` | `IN PROGRESS` | `BLOCKED` | `DONE` | `WAIVED`
 | WP-00 | Repository bootstrap & conventions | 0 | S | low | none | DONE |
 | WP-01 | Base image: builds, boots, publishes | 0 | M | medium (external base) | WP-00 | DONE |
 | WP-02 | De-bloat & package curation | 0 | M | low | WP-01 | TODO |
-| WP-03 | VM test harness & story framework | 0 | L | medium | WP-01 (images to test) | TODO |
+| WP-03 | VM test harness & story framework | 0 | L | medium | WP-01 (images to test) | IN PROGRESS |
 | WP-04 | Update pipeline, rollback, signing | 0 | M | medium | WP-01 | TODO |
 | WP-05 | Theme core | 1 | L | medium | WP-02, 03 | TODO |
 | WP-06 | Boot & login: Plymouth, SDDM, silence | 1 | S | low | WP-05 (brand assets) | TODO |
@@ -417,3 +417,256 @@ Open, and deliberately not WP-01's to close:
   emulation). WP-03 and WP-16 must plan x86_64 disk/ISO work around CI runners.
 - No installable ISO exists yet — that is WP-16. Bare-metal testing on real
   hardware begins there and at WP-17/WP-25, not here.
+
+## WP-03 VM test harness — IN PROGRESS 2026-09-02 (agent run 1, slice 1 of ~6)
+
+**Delivered so far:** `tests/harness/` — `qmp.py` (screenshots, key/pointer
+injection, run state), `console.py` (bidirectional serial console = the
+guest-exec channel), `vm.py` (boots a disk image, firmware/accelerator
+selection, evidence collection), `run.py` (suite runner), `suites/smoke.py`;
+real `just vm-test [suite] [arch]`; credential handoff from `just vm-image` via
+`build/dev-credentials.json` (gitignored).
+
+**Verified:** `just vm-test smoke` **PASSES in 25 s** on aarch64/HVF. All seven
+assertions: console login, `display-manager` active, greeter drawn, **GUI login
+through SDDM**, `plasmashell` running, `systemctl --failed` empty, os-release is
+ours. 206 units OK, 0 failed units. Evidence written on success as well as
+failure — a suite whose artifacts appear only on failure gives you nothing to
+compare a regression against.
+
+**Guest-exec choice:** the serial console, not SSH (ADR-015 ships no sshd) and
+not a guest agent (nothing should exist in the image purely to be tested). The
+throwaway account lives only in the local disk image, so the container image we
+publish stays clean — stricter than PRD 7.4's "bake into pr-NNN artifacts".
+
+**Four findings, each of which had already produced a wrong test:**
+
+1. **systemd never narrates the display manager to serial.** 71 unit lines reach
+   the console; the graphical stage is not among them, because plymouth's
+   console handoff swallows it. Ask systemd directly; do not scrape the boot log
+   for a unit description that will never appear.
+2. **A console login is not a desktop login.** `plasmashell` starts only when a
+   session begins through SDDM. The first smoke suite asserted plasmashell after
+   a serial login and would have failed on a perfectly good image.
+3. **Shell OSC 3008 session markers read as failed units.** The ANSI stripper
+   handled BEL-terminated OSC but not ST-terminated, so a prompt marker survived
+   into the `systemctl --failed` parse and looked exactly like a failure.
+4. **The image's hostname is `fedora`, not `meridian`.** `os-release` sets
+   `DEFAULT_HOSTNAME=meridian`, but the base ships an `/etc/hostname` that wins.
+   **For WP-02/WP-17:** a user's machine would introduce itself as "fedora" on
+   the network and in the shell prompt.
+
+**Slice 2 — the two audits that make ADR-011 and ADR-015 provable:**
+
+- `tests/security/ports.sh` + `suites/security.py`: reads every bound socket in
+  the running image and fails on any non-loopback listener not in
+  `tests/security/allowed-ports.txt` (owner-gated). **It found a real violation
+  on its first run** — see below.
+- `tests/privacy/network_audit.sh` + `suites/privacy.py`: captures every packet
+  from **outside** the guest via qemu `filter-dump`, so the image under audit is
+  the image that ships — the guest needs no tcpdump, no capabilities, and no
+  awareness it is watched. **PASSES**: on a settled idle system the only public
+  destinations are `fedoraproject.org:80` (connectivity check) and
+  `2.fedora.pool.ntp.org:123` (time), each printed with the ADR-011 clause that
+  permits it. Default window is the full 10 minutes; `MERIDIAN_IDLE_SECONDS`
+  shortens it while iterating, but the gate is 600 s — a daily check-in would be
+  invisible to a two-minute sample, and a daily check-in is the thing this
+  exists to catch.
+- `tests/harness/pcap.py`: dependency-free pcap + DNS reader. The audit that
+  proves "zero telemetry" should not rest on a parser nobody reads.
+  `tests/harness/test_pcap.py` proves it against synthetic captures with known
+  contents, including that a garbage file raises rather than reading as clean —
+  a parser that silently returns nothing would make the whole audit vacuous.
+
+**ADR-015 violation found, reported to WP-02 (issue #2):** the image listens on
+**tcp+udp/5355 on all interfaces, IPv4 and IPv6** — LLMNR, on by default in
+`systemd-resolved`. ADR-015 permits exactly one non-loopback listener (mDNS 5353,
+for driverless printing). Not fixed here: WP-01/WP-03 must not change image
+policy, and the allowlist is owner-gated precisely so widening it cannot be a
+convenient way to go green. LLMNR is also a known credential-relay vector on
+untrusted networks, so this is a pillar-5 defect, not a tidiness one.
+
+**Design note for later suites:** the privacy audit checks BOTH what the system
+asked DNS for AND where packets actually went, attributing every public
+destination back to a name via DNS answers. Checking only queried names would
+miss a hard-coded address — which is precisely what a check-in looks like.
+
+**Slice 3 — screenshot-diff and the stories framework:**
+
+- `tests/harness/screendiff.py`: RMSE comparison against committed baselines
+  with per-screen masks and thresholds. Nothing in it writes a baseline — only
+  `just baseline <screen>` does, and it prints a reminder to commit the result
+  on its own with a STATUS note (rule R-F). A failure writes a three-panel sheet
+  (baseline | actual | amplified difference) because "RMSE 0.0666 exceeds
+  0.0300" says a screen changed, not what changed.
+- `suites/screens.py` + baselines for `sddm-login` and `desktop` on aarch64.
+  **Passes**: RMSE 0.0038 and 0.0000 on a fresh boot where the clock had moved,
+  which is the point of the masks.
+- **Failure path proven**, not assumed: tinting a baseline's taskbar produced
+  `RMSE 0.0666 exceeds 0.0300` and a diff sheet showing the changed strip in
+  magenta against black. That is WP-03's "deliberately-broken assertion produces
+  useful artifacts" acceptance item, demonstrated.
+- `tests/stories/` + `zt_template.py` + `suites/stories.py`: discovers every
+  `zt_*.py`, runs it, reports coverage against the 22 (currently 0/22 — each
+  story lands with the WP that ships its flow). The template's central rule: the
+  harness console **observes**, it never performs the user's step. Doing the
+  task in a shell and asserting it worked proves the shell works.
+
+**Masks are documented in the baseline config, not buried in code.** Each
+`tests/baselines/<screen>/config.json` says what is masked and why, so a
+reviewer can see that the greeter's clock is excluded and the password field is
+not.
+
+**Slice 4 — CI wiring, and the WP-01 stopgap deleted:**
+
+- `ci/boot-screenshot.sh` and `ci/qmp-screenshot.py` are **gone**, as promised
+  when they were written. `ci/vm-test.sh` replaces them and keeps the three
+  things they had learned: granting `/dev/kvm`, handing the image to root's
+  store (bootc-image-builder refuses rootless), and chowning the output back.
+- PR gate runs `smoke` on x86_64. Deliberately just that one:
+  `screens` needs x86_64 baselines that must be created in their own commit
+  (R-F) and do not exist; `security` currently fails on two real ADR-015 defects
+  WP-02 owns; `privacy` needs a 10-minute window. Those run nightly instead.
+- `ci/check-no-test-user.sh` proves the **pushed** image has no `mtest` account,
+  home, credential unit or `authorized_keys` — WP-03's acceptance item, checked
+  against the ref that was actually published rather than a local build.
+- `.github/workflows/nightly.yml`: `smoke privacy security`, with a
+  `workflow_dispatch` `repeat` input — `repeat: 10` is the flaky-rate gate.
+
+**Second ADR-015 violation found, reported to WP-02 (issue #2): `sshd` ships.**
+`openssh-server` is installed (disabled, so the socket audit did not catch it).
+ADR-015 says "no SSH daemon" and section 12 states the attack surface as "browser
+is the only routine network-facing app", which is untrue while it is present. The
+assertion lives in the **security suite**, not in the test-credential check, so an
+ADR-015 violation fails the ADR-015 gate and not an unrelated one.
+
+**The nightly `security` suite is EXPECTED RED until WP-02 lands** — LLMNR on
+5355 and sshd. Recorded here so a red nightly is a known countdown rather than
+background noise: the day it goes green is the day that axis of WP-02 is done.
+
+**Acceptance — 3 of 4 met, the fourth blocked on merge:**
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | `just vm-test smoke` green locally (aarch64) **and in CI (x86_64)** | **MET, re-verified after the round-1 fixes.** Local: PASSED in 26 s, HVF. CI: PASSED in 50 s under **KVM**, 249 units OK, 0 failed units, full GUI login through SDDM — that run exercised the rewritten `Console.run` and the new negative pre-check |
+| 2 | deliberately-broken assertion produces useful artifacts | **MET.** A tinted baseline produced `RMSE 0.0666 exceeds 0.0300` plus a three-panel diff sheet |
+| 3 | `mtest` absent from any pushed image, while harness access works on the same digest locally | **MET, re-verified after the round-1 fixes.** The hardened `ci/check-no-test-user.sh` (sentinel + exit-status) passed against the **pushed** ref in the same CI run; the same digest logs in locally, because the account exists only in the local disk image. **Caveat:** on PRs the check runs against the `pr-NNN` tag, which PRD 7.4 permits to carry test credentials — only the push-to-`main` path validates `:testing` |
+| 4 | flaky-rate: smoke 10x consecutive green **in CI** | **PARTIAL.** 10/10 green locally, every pass 25 s ±1 s, 0 failures. The CI gate needs `nightly.yml` on the **default branch** — `workflow_dispatch` cannot target a feature branch — so it runs immediately after merge |
+
+`docs/testing.md` covers running suites, writing a story, re-baselining, and the
+two failure modes that have already cost time (systemd does not narrate the
+display manager to serial; a console login is not a desktop login).
+
+**Open threads — genuinely outstanding, not delivered:**
+
+- **OCR text assertions** (`assert_text`, tesseract) — PRD 7.4 names them; not
+  written. Screens are compared by pixels only, so a suite cannot yet assert
+  "the greeter says *You're all set*".
+- **vncdotool input fallback** — WP-03's Steps say "QMP first; vncdotool
+  fallback; prove both with SDDM login". Only the QMP path exists. If QMP input
+  ever fails on a host, there is no second path.
+- **`perf` suite** — genuinely blocked: it wraps WP-02's `idle_ram.sh` and
+  `boot_time.sh`, which do not exist yet.
+- **x86_64 screenshot baselines** — must be produced on an x86_64 runner and
+  committed deliberately (R-F), so `screens` runs on aarch64 only for now.
+- **Flaky-rate gate in CI** — 10/10 green locally; `workflow_dispatch` cannot
+  target a feature branch, so it runs once `nightly.yml` is on `main`.
+
+## WP-03 review round 1 — two suites could pass while their property was false
+
+An independent reviewer returned **CHANGES REQUESTED** with 2 blockers and 11
+majors. The harness *core* survived hard attacks — socket parsing, DNS
+decompression, RMSE maths, hostile pcap input, and failure propagation in
+`ci/vm-test.sh` were all confirmed sound, and a hard-coded destination with no
+DNS behind it **is** caught. The holes were all in the **outermost checks that
+decide pass/fail**, which is the worst place for them: a harness that cannot
+fail converts an unverified claim into a green check.
+
+| ID | What was wrong | Fix |
+|---|---|---|
+| BL-1 | The **privacy audit passed on an empty capture.** qemu writes the 24-byte pcap header on open, so an unattached filter-dump yields a valid empty file — and the audit printed "ADR-011 holds". The one place it is structurally blind had no self-check. | Positive control: the capture must contain DHCP or DNS, or the suite fails as *not observing* rather than passing as *nothing happened*. |
+| BL-2 | **`check-no-test-user.sh` reported clean when the container failed to start.** Any podman/OCI failure gave empty output, read as "nothing found". This is acceptance item 3, which STATUS recorded as MET on a check that could not fail. | A sentinel is emitted first and required in the output; podman's exit status is captured. Proven both ways: clean image → 0, broken podman → 1. |
+| MJ-1 | **`"inactive".endswith("active")` is `True`.** The "display-manager is active" assertion passed while it was inactive — in smoke, screens, *and* the story template, so every future story would have inherited it. | Exact match on the last line. |
+| MJ-2 | `Console.run` split on the echoed command tail and fell back to the **whole buffer** when a printk interleaved — so `pgrep -a plasmashell` could match its own echoed command and report a session that did not exist. | Paired sentinels, assembled by the shell at runtime so the echoed line never contains the expanded marker. A missing opening sentinel is an error, never a fallback. |
+| MJ-3 | Nothing distinguished "our typed password logged in" from "a session already existed". | Negative pre-check asserts plasmashell is absent *before* the GUI login. |
+| MJ-4 | `pcap.read` returned a **2-tuple** on short input while its signature and callers expect 3 — leftover from a half-applied edit. | Raises with a reason; empty is never confused with quiet. |
+| MJ-5 | **Every evidence JSON recorded `units_ok: 0, failed_units: []`** — `Console.run` clears the buffer, and `serial_text()` preferred it over the log. A no-failures record that could not record a failure. | Reads the log file. Now reports 207. |
+| MJ-6 | The screens "wait for the shell to paint" polled `... \|\| echo settled`, so the predicate was true on the first poll and never waited. | Waits on the panel process count. |
+| MJ-7 | **Masks were an uncapped bypass** — mask the whole image and any two screens match — and `/tests/harness/`, `/tests/baselines/` were **not in CODEOWNERS**, so an agent could not widen `allowed-ports.txt` without review but *could* weaken `is_local()` or delete an assertion. | 25% mask cap; masked fraction printed on every pass; CODEOWNERS extended to the harness, baselines and stories. |
+| MJ-8 | The socket assertion aborted the suite, so **the sshd assertion had never executed**. | Both collected, asserted once. |
+| MJ-9 | The "Still to deliver" block was a slice-1 leftover contradicting the acceptance table 8 lines above, burying what is genuinely open. | Replaced with real open threads (above). |
+| MJ-10 | The reported privacy PASS was measured over ~120 s, not the 600 s gate, and STATUS did not say so. | The suite now records measured vs gate duration and **says so in its own output** when short. |
+| MJ-11 | `find_disk` ignored `--arch`. | Prefers a matching path; refuses ambiguity. |
+
+Minors fixed: `${SUDO[@]}` unbound under `set -u` on bash 3.2 (the documented
+Mac path), a `--story` flag the template documented but that never existed, and
+the allowlist's domain-suffix matching now warns that a broad suffix grants the
+whole zone.
+
+**The lesson, and it is the same one as WP-01's four rounds:** the core was
+attacked hard and held; the defects were all one layer out, in the code that
+decides whether to report success. **Check the outermost layer first — it is the
+one that turns everything else into a claim.**
+
+## WP-03 review round 2 — both blockers held; the class moved one layer out again
+
+Second independent review. **Both round-1 blockers verified fixed under attack**
+(10 synthetic captures against the real `privacy.run`; 8 stub-podman cases plus
+real `probe-clean`/`probe-dirty` images built for `check-no-test-user.sh`), and
+`Console.run`'s new sentinel protocol survived seven attacks including the exact
+self-match it was written to prevent. But **MJ-6 was NOT fixed**, and five new
+defects sat in the same outermost-layer class.
+
+| ID | What was wrong | Fix |
+|---|---|---|
+| NEW-1 (major) | **`PYTHONOPTIMIZE=1` made every suite pass vacuously.** Every verdict is a bare `assert`, so one inherited environment variable turned the machinery every later WP's acceptance rests on into a rubber stamp. Demonstrated: a suite whose body is `assert False` exited **0** under `-O`. | The runner refuses to start with assertions disabled. |
+| NEW-2 (major) | **MJ-6 was not fixed.** The replacement predicate (`pgrep -c plasmashell >= 1`) is true in exactly the states the wait above it already required, so it returned on the first poll — the second wait in a row that looked like a wait and was not. STATUS claimed it fixed. | Waits until two consecutive screenshots are identical — something that genuinely starts false. Observed: *"settled after 3 frame(s)"*, and both screens now compare at RMSE 0.0000. |
+| NEW-3 (major) | The credential probe **missed `sysusers.d`** — the idiomatic way to declare a user on a bootc image, where `/etc/passwd` is regenerated on first boot. A planted `probe-sysusers` image reported clean. | Also greps `sysusers.d`, `shadow`, `sudoers.d`. |
+| NEW-4 (major) | The nightly ran `security` — documented as expected-red — in the **same job** as `smoke` and `privacy`, so a real regression in either was invisible inside a permanently red job, and **PRD 7.5's promote-to-stable gate ("nightly green 2 consecutive days") was unsatisfiable by construction.** | Split into a gating **step** for `smoke`+`privacy` and a `continue-on-error` ADR-015 **step** (one job, not two — the round-2 wording said "job"). **Half-applied:** the dispatch default still shipped `security` into the gating step. See round 3, R3-3. **Promote-to-stable remains blocked until WP-02** — that is now stated in the job output rather than implied. |
+| NEW-5 (major) | **Neither blocker fix had a regression test**, so both could be silently reopened. | `test_suite_guards.py` added — but its **BL-2 case tested the wrong branch** and was itself a vacuous pass. See round 3, R3-1. |
+| NEW-6..NEW-14 | `--repeat 0` ran nothing and exited 0; the `is-active` predicate crashed on empty output and was defeated by a trailing printk; `SystemExit` escaped the runner and exited 0; a story failing at *import* aborted every later story; `from typing import Self` needs 3.11 while the PRD 7.2 Mac path has 3.9; masks were capped but the **threshold was not**; the merged ADR-015 assert mislabelled the sshd finding; stale docstrings. | All fixed. |
+
+**Two things the owner should know.** PRD 7.5's promote-to-stable gate cannot be
+met until WP-02 removes LLMNR and sshd — not a harness problem, but now
+explicit. And on pull requests the credential check validates the `pr-NNN` tag,
+which PRD 7.4 explicitly permits to carry test credentials; only the push-to-
+`main` path checks `:testing`.
+
+**The pattern, third occurrence:** round 1 found vacuous passes inside the
+suites, round 2 found them in the layer around the suites — the runner's exit
+paths, the CI job structure, and the interpreter mode. Each round the core held
+and the outermost layer did not. **When reviewing a gate, start at the outside.**
+
+## WP-03 review round 3 — the gate's own composition
+
+Third review. The suites and the runner held under everything thrown at them —
+the reviewer attacked the `PYTHONOPTIMIZE` guard six ways, the mask/threshold
+ceilings seven ways, `--repeat` validation, the sentinel console protocol and
+the BL-1 positive control, and broke none of them. What broke was the machinery
+that decides **whether the checks run at all**, plus the round-2 regression test
+written to stop a blocker being reopened.
+
+| ID | What was wrong | Fix |
+|---|---|---|
+| R3-1 (blocker) | **The BL-2 regression test did not exercise the BL-2 fix.** Its stub `podman` failed at *every* subcommand, so the script short-circuited at "could not obtain the image" and never reached the sentinel logic that IS the fix. Deleting the fix left the guard green — a regression test that was itself a vacuous pass. | The stub now succeeds at `image exists`/`pull` and fails only at `run`, plus a no-sentinel case, a planted-finding case, and a clean case. **Verified by reopening BL-2: the guard goes red.** |
+| R3-2 (blocker) | **Nothing noticed a check that exists but is never executed.** `just lint`/`test-lint` enumerate their sub-checks by hand. Two brand-new always-failing checks were committed and all three gates reported success without running either. The outermost vacuous pass: not a check that passes wrongly, but one nothing calls. | `tests/lint/wired.py` fails if any `tests/lint/*` or `tests/harness/test_*` is not invoked by a recipe (following one hop through `.sh` wrappers), if any `ci/*.sh` is not invoked by a workflow, or if a required check name is not produced. Proven both ways. |
+| R3-3 (major) | The nightly's **dispatch default still carried `security`** into the gating step — and the flaky-rate gate is *run from that form*, so WP-03's own acceptance item was unsatisfiable. NEW-4's shape, one layer out. | Default is `smoke privacy`; `security` in the gating list is now a hard error; inputs pass via `env:` so a quote cannot break out of the script. |
+| R3-4 (major) | The credential probe **grepped for a hard-coded `mtest`** unlinked from the Justfile that creates the account, and **skipped aarch64 entirely** — so `build-aarch64` was a required check that pushed an image with no assertion against it. | The account name is read from the Justfile; the check runs on both arches. |
+| R3-5 (major) | **`screens` and `stories` ran in no automated context.** The screendiff apparatus — the largest body of code in this WP — had zero coverage, and `stories` returned green having run nothing, so "a story that exists and does not pass is a failure" was unproven. | `test_screendiff_stories.py` exercises both without a VM: real difference, identical, missing baseline, full-image mask, threshold ceiling, **and a deliberately failing story making the suite fail.** |
+| R3-6 (minor→major later) | `_settle_screen` had **no positive control** — a frozen or black screen "settled" on frame two, the BL-1 shape moved into a wait. It also wrote a three-panel diff sheet on every non-settled poll. | Now requires the settled frame to carry real detail (stddev ≥ 0.02; a real desktop measures 0.125, black 0.000), and compares directly so no spurious diff sheets are written. **First attempt was wrong** — requiring an observed *change* failed a correctly-finished desktop, which is static by the time this runs. |
+| R3-7 | Dead `wait_for_serial`: no callers, **returned `False`** on timeout where every other wait raises, and a docstring calling it "the harness's only sanctioned way to wait" — MJ-6 pre-installed for a later WP. | Deleted, with a note saying why. |
+| R3-8 | **27 inline shell blocks in the workflows were linted by nothing** — the same argument that justified linting the Justfile recipes. The tell was a live `# shellcheck disable=SC2086` written by an author who believed the file was linted. | `tests/lint/workflow_shell.py`; 17 blocks clean, and proven to catch a planted `rm -rf $UNQUOTED/*`. |
+| R3-9, R3-10 | Round-2 edit residue (a comment duplicated within itself) and two STATUS overclaims (NEW-5's BL-2 coverage; NEW-4 described as a separate "job" when it is a step). | Fixed; the round-2 table above now says what is actually true. |
+
+**Known and stated, not fixed here:** `screens` cannot run in CI because only
+aarch64 baselines exist and CI is x86_64; x86_64 baselines must be produced on
+an x86_64 runner and committed deliberately (R-F). `stories` runs nowhere
+automatically until stories exist. Both now have no-VM guards instead.
+
+**The pattern, third confirmation.** Round 1: vacuous passes inside the suites.
+Round 2: in the layer around them. Round 3: in the composition of the gate —
+whether a check is named in a hand-maintained list, whether a step sits inside a
+job whose name is typed into a settings page. Each round the core held and the
+outermost layer did not. `tests/lint/wired.py` exists because that layer had
+nothing watching it at all; it is the first check in this repo whose subject is
+*the other checks*.

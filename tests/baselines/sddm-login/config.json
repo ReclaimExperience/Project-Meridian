@@ -1,0 +1,7 @@
+{
+  "threshold": 0.03,
+  "masks": [
+    [380, 40, 520, 200]
+  ],
+  "note": "Mask covers the greeter's clock and date, which differ on every run. Without it this screen could never match twice. The mask is deliberately generous: a tight mask that clips a digit turns a passing run into a mysterious 0.031."
+}

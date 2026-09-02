@@ -1,0 +1,16 @@
+# ADR-015, in testable form.
+#
+# "no non-loopback listening sockets after boot except the explicit
+#  printing/discovery allowlist — mDNS on UDP 5353 (firewalld mdns service)
+#  with CUPS and ipp-usb bound to loopback only"
+#
+# One rule per line:  <proto>/<port>  <reason>
+# Anything listening on a non-loopback address that is not listed here fails
+# tests/security/ports.sh. Loopback-only listeners are never in scope: they are
+# unreachable from the network, which is the entire point of binding there.
+#
+# Adding a line widens the attack surface of every installed machine. It is
+# CODEOWNERS-gated for that reason (rule R-H) — an owner decision, not an
+# agent's convenience.
+
+udp/5353   mDNS service discovery: how a printer is found without a driver hunt (ADR-015)
