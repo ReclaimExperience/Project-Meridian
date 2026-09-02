@@ -517,6 +517,33 @@ miss a hard-coded address — which is precisely what a check-in looks like.
 reviewer can see that the greeter's clock is excluded and the password field is
 not.
 
+**Slice 4 — CI wiring, and the WP-01 stopgap deleted:**
+
+- `ci/boot-screenshot.sh` and `ci/qmp-screenshot.py` are **gone**, as promised
+  when they were written. `ci/vm-test.sh` replaces them and keeps the three
+  things they had learned: granting `/dev/kvm`, handing the image to root's
+  store (bootc-image-builder refuses rootless), and chowning the output back.
+- PR gate runs `smoke` on x86_64. Deliberately just that one:
+  `screens` needs x86_64 baselines that must be created in their own commit
+  (R-F) and do not exist; `security` currently fails on two real ADR-015 defects
+  WP-02 owns; `privacy` needs a 10-minute window. Those run nightly instead.
+- `ci/check-no-test-user.sh` proves the **pushed** image has no `mtest` account,
+  home, credential unit or `authorized_keys` — WP-03's acceptance item, checked
+  against the ref that was actually published rather than a local build.
+- `.github/workflows/nightly.yml`: `smoke privacy security`, with a
+  `workflow_dispatch` `repeat` input — `repeat: 10` is the flaky-rate gate.
+
+**Second ADR-015 violation found, reported to WP-02 (issue #2): `sshd` ships.**
+`openssh-server` is installed (disabled, so the socket audit did not catch it).
+ADR-015 says "no SSH daemon" and section 12 states the attack surface as "browser
+is the only routine network-facing app", which is untrue while it is present. The
+assertion lives in the **security suite**, not in the test-credential check, so an
+ADR-015 violation fails the ADR-015 gate and not an unrelated one.
+
+**The nightly `security` suite is EXPECTED RED until WP-02 lands** — LLMNR on
+5355 and sshd. Recorded here so a red nightly is a known countdown rather than
+background noise: the day it goes green is the day that axis of WP-02 is done.
+
 **Still to deliver:** OCR text assertions, screenshot-diff with baselines and
 masks, `tests/stories/` + `zt_template.py`, `perf`/`screens`/`security`/`privacy`
 suites, CI `vm-test` job, `docs/testing.md`, and the acceptance items — x86_64

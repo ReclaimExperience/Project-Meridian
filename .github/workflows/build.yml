@@ -79,23 +79,36 @@ jobs:
             bash ci/build.sh ${{ matrix.arch }}
           fi
 
-      # WP-01 stopgap: boot the image once and photograph the greeter, because
-      # its acceptance asks for a manual screenshot and the x86_64 disk image
-      # cannot be built on the owner's Apple Silicon machine at all. Also
-      # answers the PRD 7.3 [VERIFY] on /dev/kvm. WP-03 deletes this.
-      - name: Boot and photograph the greeter
+      # PRD 7.3's vm-test row. Only `smoke` gates a PR:
+      #   - `screens` needs x86_64 baselines, which must be created deliberately
+      #     in their own commit (rule R-F) and do not exist yet;
+      #   - `security` currently fails on two real ADR-015 defects that WP-02
+      #     owns (LLMNR on 5355, and sshd shipping), so gating on it here would
+      #     block every PR on someone else's work;
+      #   - `privacy` takes a 10-minute idle window by design.
+      # Those three run nightly instead. Widening this list is how a suite stops
+      # being advisory.
+      - name: Harness suites
         if: matrix.arch == 'x86_64'
         run: |
           sudo apt-get install -y -qq qemu-system-x86 ovmf
-          python3 -m pip install --quiet --break-system-packages pillow
-          bash ci/boot-screenshot.sh x86_64
+          python3 -m pip install --quiet --break-system-packages pillow numpy
+          bash ci/vm-test.sh x86_64 smoke
 
-      - name: Upload boot evidence
+      # WP-03 acceptance: the harness logs in as `mtest`, so prove that account
+      # is absent from the image that was actually PUSHED — not from a local
+      # build of it.
+      - name: Published image carries no test credentials
+        if: matrix.arch == 'x86_64' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+        run: bash ci/check-no-test-user.sh '${{ steps.tag.outputs.tag }}'
+
+      - name: Upload harness evidence
         if: matrix.arch == 'x86_64' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: wp-01-boot-evidence-x86_64
+          name: harness-evidence-x86_64
           path: |
-            build/evidence/greeter-x86_64.png
-            build/evidence/serial-x86_64.txt
+            build/evidence/*.png
+            build/evidence/*.json
+            build/evidence/serial-*.log
           if-no-files-found: warn

@@ -1,0 +1,76 @@
+# Suites too slow, too strict, or too baseline-dependent for the PR gate
+# (PRD 7.3 nightly rows). Thin shim: the bodies live in ci/.
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "Space-separated suites to run"
+        default: "smoke privacy security"
+      repeat:
+        description: "Run the suite list N times (the WP-03 flaky-rate gate uses 10)"
+        default: "1"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  nightly:
+    name: nightly-x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: extractions/setup-just@v3
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq podman skopeo qemu-system-x86 ovmf
+          python3 -m pip install --quiet --break-system-packages jsonschema PyYAML pillow numpy
+
+      - name: Prepare runner storage
+        run: bash ci/prepare-runner.sh
+
+      - name: Log in to GHCR
+        run: echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      - name: Build image
+        run: bash ci/build.sh x86_64
+
+      # `security` is EXPECTED RED until WP-02 lands: the image currently ships
+      # LLMNR on 5355 and an sshd binary, both real ADR-015 violations reported
+      # on issue #2. It runs here rather than in the PR gate so the signal is
+      # visible without blocking every PR on another WP's work — and so the day
+      # it goes green is the day that axis of WP-02 is done.
+      - name: Harness suites
+        run: |
+          set -euo pipefail
+          suites='${{ github.event.inputs.suites }}'
+          [ -n "$suites" ] || suites="smoke privacy security"
+          repeat='${{ github.event.inputs.repeat }}'
+          [ -n "$repeat" ] || repeat=1
+          failures=0
+          for run in $(seq 1 "$repeat"); do
+            echo "::group::pass ${run}/${repeat}"
+            # shellcheck disable=SC2086
+            bash ci/vm-test.sh x86_64 $suites || failures=$((failures + 1))
+            echo "::endgroup::"
+          done
+          echo "nightly: ${failures} failing pass(es) out of ${repeat}"
+          [ "$failures" -eq 0 ]
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-evidence-x86_64
+          path: |
+            build/evidence/*.png
+            build/evidence/*.json
+            build/evidence/serial-*.log
+            build/evidence/*.pcap
+          if-no-files-found: warn

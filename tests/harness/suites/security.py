@@ -101,3 +101,17 @@ def run(vm: VM, credentials: dict) -> None:
         f"because every line in it widens the attack surface of every machine."
     )
     print("security: ADR-015 listening-socket rule holds")
+
+    # ADR-015 also says, flatly, "no SSH daemon". A disabled unit is not the
+    # same as an absent daemon: it is one `systemctl enable` — or one
+    # compromised polkit rule — away from listening, and it is
+    # attack surface shipped to every machine for no user-facing purpose.
+    _status, sshd = console.run("command -v sshd || true", timeout=30)
+    assert "sshd" not in sshd, (
+        f"ADR-015 violation — an SSH daemon ships in the image: {sshd.strip()}\n"
+        "  ADR-015 says 'no SSH daemon'. It is currently installed but disabled,\n"
+        "  which is one `systemctl enable` away from listening and is surface\n"
+        "  shipped to every machine for no user-facing purpose.\n"
+        "  Remove openssh-server via os/packages.yml (WP-02)."
+    )
+    print("security: no SSH daemon in the image (ADR-015)")
