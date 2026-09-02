@@ -209,24 +209,48 @@ class Console:
     def run(self, command: str, timeout: float = 60.0) -> tuple[int, str]:
         """Run a command, returning (exit_status, output).
 
-        The exit status is fetched with a sentinel echo rather than parsed out
-        of the prompt: a command whose output happens to look like a prompt
-        would otherwise be read as having finished early.
+        Output is bracketed by a PAIR of sentinels, and the marker is assembled
+        by the shell at runtime rather than written literally into the command.
+        Both details matter:
+
+          * The serial console IS the kernel console, so an async printk can
+            land in the middle of the tty echo. An earlier version split on the
+            echoed command tail and fell back to the WHOLE buffer when that was
+            not contiguous — so `pgrep -a plasmashell || true` could "find"
+            plasmashell in its own echoed command line and report a desktop
+            session that did not exist.
+          * Because the command sends `${M}S` and the shell expands it, the
+            echoed line never contains the expanded sentinel. Only real output
+            does, so the echo cannot be mistaken for output.
+
+        A missing opening sentinel is an error, never a fallback to raw buffer.
         """
-        marker = f"__done_{int(time.monotonic() * 1000)}__"
+        marker = f"__mh{int(time.monotonic() * 1000) % 10_000_000}__"
         with self._lock:
             self._buffer = ""
-        self.send_line(f"{command}; echo {marker}$?")
-        pattern = re.compile(rf"{marker}(\d+)")
+        self.send_line(f'M={marker}; echo "${{M}}S"; {command}; echo "${{M}}E$?"')
+
+        opening = f"{marker}S"
+        closing = re.compile(rf"{marker}E(\d+)")
+
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            match = pattern.search(self._clean())
+            clean = self._clean()
+            match = closing.search(clean)
             if match:
-                output = self._clean()
-                body = output.split(f"echo {marker}$?", 1)[-1]
-                body = pattern.split(body)[0]
+                if opening not in clean:
+                    raise ConsoleError(
+                        f"command output was not bracketed: the opening sentinel "
+                        f"never appeared for {command!r}.\n"
+                        f"  Refusing to guess which part of the buffer is output.\n"
+                        f"  Buffer tail:\n  "
+                        + "\n  ".join(clean.strip().split("\n")[-15:])
+                    )
+                body = clean.split(opening, 1)[1]
+                body = closing.split(body)[0]
                 return int(match.group(1)), body.strip()
             time.sleep(0.3)
+
         tail = "\n  ".join(self._clean().strip().split("\n")[-25:])
         raise ConsoleError(
             f"command timed out after {timeout:.0f}s: {command!r}\n"

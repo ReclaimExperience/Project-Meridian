@@ -33,7 +33,8 @@ def capture_screens(vm: VM, credentials: dict) -> dict[str, Path]:
     console.login(user, password, timeout=600)
     console.wait_until(
         "systemctl is-active display-manager",
-        lambda out: out.strip().endswith("active"),
+        # NOT endswith("active"): "inactive" ends with "active".
+        lambda out: out.strip().splitlines()[-1].strip() == "active",
         timeout=300,
         description="display-manager to be active",
     )
@@ -51,14 +52,18 @@ def capture_screens(vm: VM, credentials: dict) -> dict[str, Path]:
         timeout=420,
         description="plasmashell to start after the GUI login",
     )
-    # Let the shell finish painting: comparing mid-draw produces a diff that
-    # says "the theme changed" when nothing did.
+    # Let the shell finish painting before capturing. An earlier version polled
+    # `qdbus6 ... || echo settled`, whose `|| echo` guaranteed non-empty output —
+    # so the predicate was true on the first poll and the wait never waited.
+    # Wait on something that can actually be false: the panel process.
     console.wait_until(
-        "qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
-        "'print(1)' 2>/dev/null || echo settled",
-        lambda out: out.strip() != "",
+        "pgrep -c plasmashell || true",
+        lambda out: (
+            out.strip().splitlines()[-1].strip().isdigit()
+            and int(out.strip().splitlines()[-1].strip()) >= 1
+        ),
         timeout=120,
-        description="plasmashell to answer",
+        description="the panel to be up",
     )
     captured["desktop"] = vm.screenshot("screen-desktop")
 
@@ -79,9 +84,13 @@ def run(vm: VM, credentials: dict) -> None:
 
     for result in results:
         if result.passed:
+            # Masked fraction is printed on PASSES too: a mask is a quieter way
+            # of doing what raising the threshold does, so it should be visible
+            # in normal output rather than only in a config file.
             print(
                 f"  ok    {result.screen}: RMSE {result.rmse:.4f} "
-                f"<= {result.threshold:.4f}"
+                f"<= {result.threshold:.4f}  "
+                f"(masked {result.masked_fraction:.1%})"
             )
         else:
             print(f"  FAIL  {result.message}")

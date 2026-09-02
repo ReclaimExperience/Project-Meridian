@@ -13,6 +13,11 @@
 # while this file stays short. Adding a line means a fresh install now talks to
 # somewhere new — an owner decision (rule R-H), never an agent's.
 #
+# Matching is by DOMAIN SUFFIX, so a line grants the whole zone beneath it:
+# "fedoraproject.org" also permits telemetry.fedoraproject.org. That is the
+# loosest thing about this file. Prefer the most specific host that works, and
+# treat a broad suffix as a deliberate, reviewable choice.
+#
 # One suffix per line: <domain-suffix>  <which ADR-011 clause permits it>
 
 ghcr.io                     OS image update checks (ADR-008 / ADR-014)

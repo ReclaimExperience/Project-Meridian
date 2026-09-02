@@ -111,9 +111,17 @@ def _dns_message(payload: bytes) -> tuple[list[str], dict[str, str]]:
 
 def read(path: str | Path) -> tuple[list[Flow], list[str], dict[str, str]]:
     """Return (outbound flows, DNS names queried, {resolved_ip: name})."""
-    data = Path(path).read_bytes()
+    file = Path(path)
+    if not file.is_file():
+        raise ValueError(f"{path} does not exist — there is nothing to audit")
+    data = file.read_bytes()
     if len(data) < 24:
-        return [], []
+        # Below the pcap global header. Raise rather than return empty: an empty
+        # result is indistinguishable from "a quiet system", which is exactly
+        # the confusion this audit must never make.
+        raise ValueError(
+            f"{path} is only {len(data)} bytes — too short to be a pcap file"
+        )
 
     magic = struct.unpack_from("<I", data, 0)[0]
     if magic == PCAP_MAGIC_LE:

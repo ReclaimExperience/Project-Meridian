@@ -313,10 +313,15 @@ class VM:
 
     def serial_text(self) -> str:
         """Boot log with ANSI colour stripped, for grepping and for evidence."""
-        if self._console is not None:
-            raw = self._console.transcript()
-        elif self.serial_log.exists():
+        # The LOG, not the live transcript. Console.run() clears its buffer on
+        # every command, so the transcript holds only the last command by the
+        # time a report is written — which made every evidence file record
+        # "units_ok: 0, failed_units: []", a no-failures record that could not
+        # have recorded a failure.
+        if self.serial_log.exists():
             raw = self.serial_log.read_text(errors="replace")
+        elif self._console is not None:
+            raw = self._console.transcript()
         else:
             return ""
         import re

@@ -27,6 +27,10 @@ from pathlib import Path
 
 DEFAULT_THRESHOLD = 0.03
 
+# Beyond this, a comparison is asserting about too little of the screen to
+# mean anything. Chosen to leave room for a clock and a battery readout.
+MAX_MASKED_FRACTION = 0.25
+
 
 @dataclass
 class ScreenConfig:
@@ -59,6 +63,7 @@ class Comparison:
     actual: Path
     diff: Path | None = None
     message: str = ""
+    masked_fraction: float = 0.0
 
 
 def _load_rgb(path: Path):
@@ -126,6 +131,30 @@ def compare(
             ),
         )
 
+    # A mask does the same job as a raised threshold, more quietly: mask the
+    # whole image and any two screens compare identical. Cap it, and report the
+    # masked fraction on EVERY comparison so it is visible in passing output
+    # rather than only discoverable by reading a config file.
+    width, height = baseline.size
+    masked_area = sum(w * h for _x, _y, w, h in config.masks)
+    masked_fraction = masked_area / float(width * height)
+    if masked_fraction > MAX_MASKED_FRACTION:
+        return Comparison(
+            screen=screen,
+            rmse=float("nan"),
+            threshold=config.threshold,
+            passed=False,
+            baseline=baseline_path,
+            actual=actual_path,
+            message=(
+                f"{screen}: masks cover {masked_fraction:.0%} of the screen, over "
+                f"the {MAX_MASKED_FRACTION:.0%} limit.\n"
+                f"  A mask is a quieter way of doing what raising the threshold "
+                f"does. If this much of the screen is unstable, the screen is the\n"
+                f"  wrong thing to be comparing."
+            ),
+        )
+
     masked_baseline = np.asarray(_apply_masks(baseline, config.masks), dtype=np.float64)
     masked_actual = np.asarray(_apply_masks(actual, config.masks), dtype=np.float64)
 
@@ -143,6 +172,7 @@ def compare(
         rmse=rmse,
         threshold=config.threshold,
         passed=passed,
+        masked_fraction=masked_fraction,
         baseline=baseline_path,
         actual=actual_path,
         diff=diff_path,

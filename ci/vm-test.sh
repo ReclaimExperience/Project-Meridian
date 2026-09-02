@@ -53,7 +53,9 @@ if [[ "$(podman info --format '{{ .Host.Security.Rootless }}')" == "true" ]]; th
 else
     SUDO=()
 fi
-"${SUDO[@]}" just vm-image "$ARCH"
+# Empty-array expansion is an unbound-variable error under `set -u` on bash 3.2,
+# which is what macOS ships and which this repo targets (PRD 7.2).
+"${SUDO[@]+"${SUDO[@]}"}" just vm-image "$ARCH"
 # The builder writes as root; the harness and the artifact upload read as the
 # runner user.
 sudo chown -R "$(id -u):$(id -g)" build

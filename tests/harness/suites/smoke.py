@@ -38,7 +38,8 @@ def run(vm: VM, credentials: dict) -> None:
     # --- 2. the display manager is actually running --------------------------
     console.wait_until(
         "systemctl is-active display-manager",
-        lambda out: out.strip().endswith("active"),
+        # NOT endswith("active"): "inactive" ends with "active".
+        lambda out: out.strip().splitlines()[-1].strip() == "active",
         timeout=300,
         description="display-manager to be active",
     )
@@ -59,6 +60,19 @@ def run(vm: VM, credentials: dict) -> None:
     # straight into it. Typing is deliberately slow (see QMP.type_text): SDDM
     # drops keys delivered faster than a human types, and a password that loses
     # a character fails in a way that looks like a real defect.
+    # Negative pre-check: prove no session exists YET, so the assertion below
+    # is about our typed password and not about a session that was already
+    # running. Without this, enabling autologin in a later WP would leave smoke
+    # claiming "GUI login through SDDM" while the keystrokes went nowhere.
+    _status, before = console.run("pgrep -a plasmashell || true", timeout=30)
+    assert "plasmashell" not in before, (
+        "plasmashell was already running BEFORE the GUI login, so this suite "
+        "cannot tell whether logging in works.\n"
+        f"  console said: {before.strip()!r}\n"
+        "  If autologin is now on by design, this suite needs rewriting to "
+        "assert that instead — do not delete the check."
+    )
+
     print(f"smoke: logging in through SDDM as {user}")
     vm.qmp.type_text(password)
     vm.qmp.key("ret")

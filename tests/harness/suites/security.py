@@ -93,6 +93,21 @@ def run(vm: VM, credentials: dict) -> None:
     for entry in listed:
         print(f"  allowed: {entry}")
 
+    # Collect BOTH ADR-015 checks before asserting. Asserting on the sockets
+    # first meant the sshd check could never execute while LLMNR was present —
+    # so it never had, and a second violation stayed invisible behind the first.
+    _status, sshd = console.run("command -v sshd || true", timeout=30)
+    if "sshd" in sshd:
+        violations.append(
+            f"an SSH daemon ships in the image: {sshd.strip()} — ADR-015 says "
+            f"'no SSH daemon'. It is installed but disabled, which is one "
+            f"`systemctl enable` away from listening and is attack surface on "
+            f"every machine for no user-facing purpose. Remove openssh-server "
+            f"via os/packages.yml (WP-02)."
+        )
+    else:
+        print("security: no SSH daemon in the image (ADR-015)")
+
     assert not violations, (
         "ADR-015 violation — non-loopback listeners that are not on the allowlist:\n  "
         + "\n  ".join(violations)
@@ -101,17 +116,3 @@ def run(vm: VM, credentials: dict) -> None:
         f"because every line in it widens the attack surface of every machine."
     )
     print("security: ADR-015 listening-socket rule holds")
-
-    # ADR-015 also says, flatly, "no SSH daemon". A disabled unit is not the
-    # same as an absent daemon: it is one `systemctl enable` — or one
-    # compromised polkit rule — away from listening, and it is
-    # attack surface shipped to every machine for no user-facing purpose.
-    _status, sshd = console.run("command -v sshd || true", timeout=30)
-    assert "sshd" not in sshd, (
-        f"ADR-015 violation — an SSH daemon ships in the image: {sshd.strip()}\n"
-        "  ADR-015 says 'no SSH daemon'. It is currently installed but disabled,\n"
-        "  which is one `systemctl enable` away from listening and is surface\n"
-        "  shipped to every machine for no user-facing purpose.\n"
-        "  Remove openssh-server via os/packages.yml (WP-02)."
-    )
-    print("security: no SSH daemon in the image (ADR-015)")

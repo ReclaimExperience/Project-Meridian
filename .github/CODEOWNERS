@@ -40,6 +40,14 @@
 /os/rootfs/etc/containers/policy.json       @ReclaimExperience/owners  # planned: WP-04
 
 # The gates themselves. Rule R-E: budgets are laws; you never edit the gate.
+# The harness IS a gate. An agent could not widen allowed-ports.txt without
+# review, but could weaken is_local(), delete an assertion, or paste a
+# full-image mask into a baseline config with none — a bigger hole than the one
+# the allowlists close.
+/tests/harness/             @ReclaimExperience/owners
+/tests/baselines/           @ReclaimExperience/owners
+/tests/stories/             @ReclaimExperience/owners
+
 /tests/lint/                @ReclaimExperience/owners
 /tests/perf/                @ReclaimExperience/owners
 /tests/privacy/             @ReclaimExperience/owners

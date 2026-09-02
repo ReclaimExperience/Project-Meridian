@@ -29,6 +29,19 @@ SUITES = ("smoke", "security", "privacy", "screens", "stories")
 def find_disk(arch: str) -> Path:
     build = ROOT / "build"
     candidates = sorted(build.rglob("*.qcow2")) if build.is_dir() else []
+    # Prefer a disk whose path names this arch. `arch` was previously used only
+    # in the error string, so on a machine holding both images the harness
+    # booted whichever sorted first and then labelled its evidence and its
+    # baselines with the arch it had been ASKED for.
+    matching = [p for p in candidates if arch in str(p)]
+    if matching:
+        return matching[0]
+    if candidates and len(candidates) > 1:
+        raise SystemExit(
+            f"several disk images under {build}/ and none names {arch}:\n  "
+            + "\n  ".join(str(p) for p in candidates)
+            + "\n  Pass one explicitly:  python3 tests/harness/run.py <suite> --disk <path>"
+        )
     if not candidates:
         raise SystemExit(
             f"no disk image under {build}/.\n"

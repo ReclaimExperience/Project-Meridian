@@ -557,8 +557,53 @@ background noise: the day it goes green is the day that axis of WP-02 is done.
 two failure modes that have already cost time (systemd does not narrate the
 display manager to serial; a console login is not a desktop login).
 
-**Still to deliver (not acceptance-blocking):** OCR text assertions, screenshot-diff with baselines and
-masks, `tests/stories/` + `zt_template.py`, `perf`/`screens`/`security`/`privacy`
-suites, CI `vm-test` job, `docs/testing.md`, and the acceptance items — x86_64
-smoke in CI, deliberately-broken-assertion artifacts, `mtest` absent from any
-pushed digest, and 10x consecutive green for the flaky-rate gate.
+**Open threads — genuinely outstanding, not delivered:**
+
+- **OCR text assertions** (`assert_text`, tesseract) — PRD 7.4 names them; not
+  written. Screens are compared by pixels only, so a suite cannot yet assert
+  "the greeter says *You're all set*".
+- **vncdotool input fallback** — WP-03's Steps say "QMP first; vncdotool
+  fallback; prove both with SDDM login". Only the QMP path exists. If QMP input
+  ever fails on a host, there is no second path.
+- **`perf` suite** — genuinely blocked: it wraps WP-02's `idle_ram.sh` and
+  `boot_time.sh`, which do not exist yet.
+- **x86_64 screenshot baselines** — must be produced on an x86_64 runner and
+  committed deliberately (R-F), so `screens` runs on aarch64 only for now.
+- **Flaky-rate gate in CI** — 10/10 green locally; `workflow_dispatch` cannot
+  target a feature branch, so it runs once `nightly.yml` is on `main`.
+
+## WP-03 review round 1 — two suites could pass while their property was false
+
+An independent reviewer returned **CHANGES REQUESTED** with 2 blockers and 11
+majors. The harness *core* survived hard attacks — socket parsing, DNS
+decompression, RMSE maths, hostile pcap input, and failure propagation in
+`ci/vm-test.sh` were all confirmed sound, and a hard-coded destination with no
+DNS behind it **is** caught. The holes were all in the **outermost checks that
+decide pass/fail**, which is the worst place for them: a harness that cannot
+fail converts an unverified claim into a green check.
+
+| ID | What was wrong | Fix |
+|---|---|---|
+| BL-1 | The **privacy audit passed on an empty capture.** qemu writes the 24-byte pcap header on open, so an unattached filter-dump yields a valid empty file — and the audit printed "ADR-011 holds". The one place it is structurally blind had no self-check. | Positive control: the capture must contain DHCP or DNS, or the suite fails as *not observing* rather than passing as *nothing happened*. |
+| BL-2 | **`check-no-test-user.sh` reported clean when the container failed to start.** Any podman/OCI failure gave empty output, read as "nothing found". This is acceptance item 3, which STATUS recorded as MET on a check that could not fail. | A sentinel is emitted first and required in the output; podman's exit status is captured. Proven both ways: clean image → 0, broken podman → 1. |
+| MJ-1 | **`"inactive".endswith("active")` is `True`.** The "display-manager is active" assertion passed while it was inactive — in smoke, screens, *and* the story template, so every future story would have inherited it. | Exact match on the last line. |
+| MJ-2 | `Console.run` split on the echoed command tail and fell back to the **whole buffer** when a printk interleaved — so `pgrep -a plasmashell` could match its own echoed command and report a session that did not exist. | Paired sentinels, assembled by the shell at runtime so the echoed line never contains the expanded marker. A missing opening sentinel is an error, never a fallback. |
+| MJ-3 | Nothing distinguished "our typed password logged in" from "a session already existed". | Negative pre-check asserts plasmashell is absent *before* the GUI login. |
+| MJ-4 | `pcap.read` returned a **2-tuple** on short input while its signature and callers expect 3 — leftover from a half-applied edit. | Raises with a reason; empty is never confused with quiet. |
+| MJ-5 | **Every evidence JSON recorded `units_ok: 0, failed_units: []`** — `Console.run` clears the buffer, and `serial_text()` preferred it over the log. A no-failures record that could not record a failure. | Reads the log file. Now reports 207. |
+| MJ-6 | The screens "wait for the shell to paint" polled `... \|\| echo settled`, so the predicate was true on the first poll and never waited. | Waits on the panel process count. |
+| MJ-7 | **Masks were an uncapped bypass** — mask the whole image and any two screens match — and `/tests/harness/`, `/tests/baselines/` were **not in CODEOWNERS**, so an agent could not widen `allowed-ports.txt` without review but *could* weaken `is_local()` or delete an assertion. | 25% mask cap; masked fraction printed on every pass; CODEOWNERS extended to the harness, baselines and stories. |
+| MJ-8 | The socket assertion aborted the suite, so **the sshd assertion had never executed**. | Both collected, asserted once. |
+| MJ-9 | The "Still to deliver" block was a slice-1 leftover contradicting the acceptance table 8 lines above, burying what is genuinely open. | Replaced with real open threads (above). |
+| MJ-10 | The reported privacy PASS was measured over ~120 s, not the 600 s gate, and STATUS did not say so. | The suite now records measured vs gate duration and **says so in its own output** when short. |
+| MJ-11 | `find_disk` ignored `--arch`. | Prefers a matching path; refuses ambiguity. |
+
+Minors fixed: `${SUDO[@]}` unbound under `set -u` on bash 3.2 (the documented
+Mac path), a `--story` flag the template documented but that never existed, and
+the allowlist's domain-suffix matching now warns that a broad suffix grants the
+whole zone.
+
+**The lesson, and it is the same one as WP-01's four rounds:** the core was
+attacked hard and held; the defects were all one layer out, in the code that
+decides whether to report success. **Check the outermost layer first — it is the
+one that turns everything else into a claim.**

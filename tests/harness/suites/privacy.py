@@ -112,12 +112,36 @@ def run(vm: VM, credentials: dict) -> None:
 
     # Read the capture only after the window closes: qemu flushes as it goes,
     # and parsing mid-flight would race the writer for the final frames.
+    if not vm.capture_file.is_file():
+        raise AssertionError(
+            f"no capture at {vm.capture_file} — the audit did not observe anything, "
+            f"so it cannot report a clean result."
+        )
+
     flows, names, resolved = pcap.read(vm.capture_file)
     allowed = load_allowlist()
 
+    # POSITIVE CONTROL. qemu writes the 24-byte pcap header the moment it opens
+    # the file, so an unattached filter-dump, a NIC that never came up, or a
+    # future second netdev all yield a VALID, EMPTY capture — and an audit that
+    # sees nothing would otherwise print "ADR-011 holds". The one place this
+    # check is structurally blind is the one place it must not fail open.
+    #
+    # A booted, networked guest always produces DHCP and DNS. If neither is
+    # here, the capture is not working; that is a broken audit, not a clean run.
+    control = [f for f in flows if f.port in (53, 67, 68)]
+    assert control, (
+        f"the capture contains {len(flows)} flow(s) and no DHCP or DNS at all, so "
+        f"the audit is not observing this guest's traffic.\n"
+        f"  A green result here would mean 'saw nothing', not 'nothing happened'.\n"
+        f"  Check that filter-dump is attached to the NIC the guest actually uses.\n"
+        f"  Capture: {vm.capture_file} ({vm.capture_file.stat().st_size} bytes)"
+    )
+
     print(
         f"privacy: {len(flows)} flow(s), {len(names)} DNS name(s), "
-        f"{len(resolved)} address(es) attributed to a name"
+        f"{len(resolved)} address(es) attributed to a name "
+        f"[capture live: {len(control)} DHCP/DNS flow(s)]"
     )
 
     violations, accepted = [], []
@@ -165,4 +189,26 @@ def run(vm: VM, credentials: dict) -> None:
         f"that file is owner-gated,\nbecause every line means a fresh install talks "
         f"somewhere new.\n\nFull capture: {vm.capture_file}"
     )
-    print("privacy: ADR-011 holds — no unpermitted destination in the idle window")
+    vm.write_report(
+        "privacy-audit",
+        {
+            "idle_seconds_measured": idle,
+            "idle_seconds_gate": DEFAULT_IDLE_SECONDS,
+            "at_gate_duration": idle >= DEFAULT_IDLE_SECONDS,
+            "flows": len(flows),
+            "public_flows": len([f for f in flows if not is_local(f.destination)]),
+            "dns_names": sorted(names),
+            "permitted": sorted(set(accepted)),
+        },
+    )
+    if idle < DEFAULT_IDLE_SECONDS:
+        print(
+            f"privacy: ADR-011 holds over a {idle}s window — but the GATE is "
+            f"{DEFAULT_IDLE_SECONDS}s, and this run does not meet it. A daily "
+            f"check-in is invisible to a short sample."
+        )
+    else:
+        print(
+            f"privacy: ADR-011 holds over the full {idle}s gate window — no "
+            f"unpermitted destination"
+        )

@@ -23,8 +23,8 @@ Three rules, all from the PRD:
   * **No network assertions in smoke-adjacent paths.** A registry hiccup must
     never read as a broken product.
 
-Run one story:      just vm-test stories --story zt_NN_short_name
 Run them all:       just vm-test stories
+Run one story:      python3 tests/harness/run.py stories --keep   (then read the output)
 """
 
 from __future__ import annotations
@@ -48,7 +48,8 @@ def run(vm: VM, credentials: dict) -> None:
     console.login(user, password, timeout=600)
     console.wait_until(
         "systemctl is-active display-manager",
-        lambda out: out.strip().endswith("active"),
+        # NOT endswith("active"): "inactive" ends with "active".
+        lambda out: out.strip().splitlines()[-1].strip() == "active",
         timeout=300,
         description="display-manager to be active",
     )
