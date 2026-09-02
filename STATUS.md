@@ -491,6 +491,32 @@ asked DNS for AND where packets actually went, attributing every public
 destination back to a name via DNS answers. Checking only queried names would
 miss a hard-coded address — which is precisely what a check-in looks like.
 
+**Slice 3 — screenshot-diff and the stories framework:**
+
+- `tests/harness/screendiff.py`: RMSE comparison against committed baselines
+  with per-screen masks and thresholds. Nothing in it writes a baseline — only
+  `just baseline <screen>` does, and it prints a reminder to commit the result
+  on its own with a STATUS note (rule R-F). A failure writes a three-panel sheet
+  (baseline | actual | amplified difference) because "RMSE 0.0666 exceeds
+  0.0300" says a screen changed, not what changed.
+- `suites/screens.py` + baselines for `sddm-login` and `desktop` on aarch64.
+  **Passes**: RMSE 0.0038 and 0.0000 on a fresh boot where the clock had moved,
+  which is the point of the masks.
+- **Failure path proven**, not assumed: tinting a baseline's taskbar produced
+  `RMSE 0.0666 exceeds 0.0300` and a diff sheet showing the changed strip in
+  magenta against black. That is WP-03's "deliberately-broken assertion produces
+  useful artifacts" acceptance item, demonstrated.
+- `tests/stories/` + `zt_template.py` + `suites/stories.py`: discovers every
+  `zt_*.py`, runs it, reports coverage against the 22 (currently 0/22 — each
+  story lands with the WP that ships its flow). The template's central rule: the
+  harness console **observes**, it never performs the user's step. Doing the
+  task in a shell and asserting it worked proves the shell works.
+
+**Masks are documented in the baseline config, not buried in code.** Each
+`tests/baselines/<screen>/config.json` says what is masked and why, so a
+reviewer can see that the greeter's clock is excluded and the password field is
+not.
+
 **Still to deliver:** OCR text assertions, screenshot-diff with baselines and
 masks, `tests/stories/` + `zt_template.py`, `perf`/`screens`/`security`/`privacy`
 suites, CI `vm-test` job, `docs/testing.md`, and the acceptance items — x86_64

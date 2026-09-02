@@ -1,6 +1,6 @@
 # ADR-011, in testable form.
 #
-# "Meridian ships no telemetry, crash reporting, analytics, unique identifiers,
+# "[The OS] ships no telemetry, crash reporting, analytics, unique identifiers,
 #  or check-in of any kind. The complete list of automatic outbound connections
 #  is: registry update checks (OS + Flatpak), fwupd metadata, NTP, geoip lookup
 #  during OOBE timezone detection, and captive-portal detection."

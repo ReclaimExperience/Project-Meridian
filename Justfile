@@ -413,9 +413,16 @@ vm-test suite="smoke" arch="":
     [ "$arch" = "arm64" ] && arch=aarch64
     python3 tests/harness/run.py "{{ suite }}" --arch "$arch"
 
-# Re-baseline one screenshot, deliberately (PRD 7.4, rule R-F)
-baseline screen:
-    @just _todo WP-03 "baseline {{ screen }}"
+# Re-baseline screenshots, deliberately (PRD 7.4, rule R-F).
+# screen: a screen name, or "all". Commit the result on its own, with a
+# STATUS.md note — a baseline that changes quietly is a regression that passed.
+baseline screen="all" arch="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    arch="{{ arch }}"
+    [ -n "$arch" ] || arch="$(uname -m)"
+    [ "$arch" = "arm64" ] && arch=aarch64
+    python3 tests/harness/run.py screens --arch "$arch" --baseline "{{ screen }}"
 
 # Perf gates: idle RAM and boot time (PRD 1.5)
 perf:

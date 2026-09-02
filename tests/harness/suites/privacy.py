@@ -18,10 +18,9 @@ catch.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import time
-
-import ipaddress
 
 from harness import pcap
 from harness.vm import ROOT, VM
@@ -52,8 +51,14 @@ def is_local(address: str) -> bool:
         ip = ipaddress.ip_address(address)
     except ValueError:
         return False
-    return (ip.is_private or ip.is_loopback or ip.is_link_local
-            or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
 
 
 def is_reverse_lookup(name: str) -> bool:

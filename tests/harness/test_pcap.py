@@ -16,30 +16,53 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from harness import pcap  # noqa: E402
+# The address qemu's user-mode networking gives the guest.
+GUEST_IP = bytes((10, 0, 2, 15))
+
+from harness import pcap
 
 
 def dns_query(name: str) -> bytes:
     labels = b"".join(bytes([len(p)]) + p.encode() for p in name.split(".")) + b"\x00"
-    return struct.pack(">HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0) + labels + struct.pack(">HH", 1, 1)
+    return (
+        struct.pack(">HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0)
+        + labels
+        + struct.pack(">HH", 1, 1)
+    )
 
 
 def udp_packet(dst: str, dport: int, payload: bytes) -> bytes:
     udp = struct.pack(">HHHH", 40000, dport, 8 + len(payload), 0) + payload
-    ip = (bytes([0x45, 0, 0, 0, 0, 0, 0, 0, 64, 17, 0, 0])
-          + bytes(int(o) for o in "10.0.2.15".split("."))
-          + bytes(int(o) for o in dst.split(".")))
+    ip = (
+        bytes([0x45, 0, 0, 0, 0, 0, 0, 0, 64, 17, 0, 0])
+        + GUEST_IP
+        + bytes(int(o) for o in dst.split("."))
+    )
     ip = ip[:2] + struct.pack(">H", len(ip) + len(udp)) + ip[4:]
-    return b"\x52\x55\x0a\x00\x02\x02" + b"\x52\x54\x00\x12\x34\x56" + b"\x08\x00" + ip + udp
+    return (
+        b"\x52\x55\x0a\x00\x02\x02"
+        + b"\x52\x54\x00\x12\x34\x56"
+        + b"\x08\x00"
+        + ip
+        + udp
+    )
 
 
 def tcp_packet(dst: str, dport: int) -> bytes:
     tcp = struct.pack(">HHIIBBHHH", 40001, dport, 0, 0, 0x50, 0x02, 0, 0, 0)
-    ip = (bytes([0x45, 0, 0, 0, 0, 0, 0, 0, 64, 6, 0, 0])
-          + bytes(int(o) for o in "10.0.2.15".split("."))
-          + bytes(int(o) for o in dst.split(".")))
+    ip = (
+        bytes([0x45, 0, 0, 0, 0, 0, 0, 0, 64, 6, 0, 0])
+        + GUEST_IP
+        + bytes(int(o) for o in dst.split("."))
+    )
     ip = ip[:2] + struct.pack(">H", len(ip) + len(tcp)) + ip[4:]
-    return b"\x52\x55\x0a\x00\x02\x02" + b"\x52\x54\x00\x12\x34\x56" + b"\x08\x00" + ip + tcp
+    return (
+        b"\x52\x55\x0a\x00\x02\x02"
+        + b"\x52\x54\x00\x12\x34\x56"
+        + b"\x08\x00"
+        + ip
+        + tcp
+    )
 
 
 def write_pcap(path: Path, frames: list[bytes]) -> None:
@@ -55,11 +78,14 @@ def main() -> int:
         path = Path(tmp) / "c.pcap"
 
         # 1. a capture with known contents must be read back exactly
-        write_pcap(path, [
-            udp_packet("10.0.2.3", 53, dns_query("telemetry.example.com")),
-            udp_packet("10.0.2.3", 53, dns_query("ghcr.io")),
-            tcp_packet("140.82.121.5", 443),
-        ])
+        write_pcap(
+            path,
+            [
+                udp_packet("10.0.2.3", 53, dns_query("telemetry.example.com")),
+                udp_packet("10.0.2.3", 53, dns_query("ghcr.io")),
+                tcp_packet("140.82.121.5", 443),
+            ],
+        )
         flows, names, _resolved = pcap.read(path)
         for expected in ("telemetry.example.com", "ghcr.io"):
             if expected not in names:

@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from harness.vm import ROOT, VM, VMError, choose_accelerator, host_arch
 
-SUITES = ("smoke", "security", "privacy")
+SUITES = ("smoke", "security", "privacy", "screens", "stories")
 
 
 def find_disk(arch: str) -> Path:
@@ -48,6 +48,31 @@ def load_credentials() -> dict:
     return json.loads(path.read_text())
 
 
+def _write_baselines(vm, credentials, module, which: str) -> None:
+    """Capture screens and commit them as the new reference.
+
+    Separate from the suite on purpose (rule R-F): a test run must never write
+    its own baseline, or a regression quietly becomes the new expectation.
+    """
+    import shutil
+
+    if not hasattr(module, "capture_screens"):
+        raise SystemExit("suite has no capture_screens(); cannot baseline it")
+
+    captured = module.capture_screens(vm, credentials)
+    baselines = ROOT / "tests" / "baselines"
+    for screen, path in captured.items():
+        if which not in ("all", screen):
+            continue
+        directory = baselines / screen
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / f"{vm.arch}.png"
+        shutil.copy(path, destination)
+        print(f"baseline: wrote {destination.relative_to(ROOT)}")
+    print("\nbaseline: review these as images in the PR, and commit them ON THEIR OWN")
+    print("baseline: with a STATUS.md note saying what changed and why (rule R-F).")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a VM harness suite.")
     parser.add_argument("suite", nargs="?", default="smoke", choices=SUITES)
@@ -57,6 +82,14 @@ def main() -> int:
         "--keep",
         action="store_true",
         help="leave the VM running after the suite (for debugging)",
+    )
+    parser.add_argument(
+        "--baseline",
+        metavar="SCREEN",
+        nargs="?",
+        const="all",
+        help="capture screens and WRITE them as baselines instead of comparing "
+        "(rule R-F: this is deliberate, and belongs in its own commit)",
     )
     args = parser.parse_args()
 
@@ -77,7 +110,10 @@ def main() -> int:
     failure: BaseException | None = None
     try:
         vm.start()
-        module.run(vm, credentials)
+        if args.baseline:
+            _write_baselines(vm, credentials, module, args.baseline)
+        else:
+            module.run(vm, credentials)
     except (AssertionError, VMError, Exception) as exc:  # noqa: BLE001
         failure = exc
     finally:
