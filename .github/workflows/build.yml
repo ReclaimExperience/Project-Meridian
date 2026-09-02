@@ -79,21 +79,27 @@ jobs:
             bash ci/build.sh ${{ matrix.arch }}
           fi
 
-      # PRD 7.3's vm-test row. Only `smoke` gates a PR:
-      #   - `screens` needs x86_64 baselines, which must be created deliberately
-      #     in their own commit (rule R-F) and do not exist yet;
-      #   - `security` currently fails on two real ADR-015 defects that WP-02
-      #     owns (LLMNR on 5355, and sshd shipping), so gating on it here would
-      #     block every PR on someone else's work;
+      # PRD 7.3's vm-test row. `smoke`, `security` and `perf` gate a PR:
+      #   - `security` was expected-red until WP-02, on the two ADR-015 defects
+      #     the WP-03 harness found (LLMNR listening on 5355, and openssh-server
+      #     shipping). WP-02 removed both, so it gates from here on — an
+      #     expected-red suite that nobody promotes when it is fixed is just a
+      #     suite that never has to pass, and PRD 7.5's promote-to-stable gate
+      #     stays unsatisfiable while it sits in the nightly.
+      #   - `perf` enforces PRD 2's budgets. It costs a boot plus a two-minute
+      #     settle, which is the price of noticing idle RAM drift in the PR that
+      #     causes it rather than a month later.
+      #   - `screens` still needs x86_64 baselines, which must be created
+      #     deliberately in their own commit (rule R-F) and do not exist yet;
       #   - `privacy` takes a 10-minute idle window by design.
-      # Those three run nightly instead. Widening this list is how a suite stops
-      # being advisory.
+      # Those two run nightly. Widening this list is how a suite stops being
+      # advisory; narrowing it is how a gate stops being a gate.
       - name: Harness suites
         if: matrix.arch == 'x86_64'
         run: |
           sudo apt-get install -y -qq qemu-system-x86 ovmf
           python3 -m pip install --quiet --break-system-packages pillow numpy
-          bash ci/vm-test.sh x86_64 smoke
+          bash ci/vm-test.sh x86_64 smoke security perf
 
       # WP-03 acceptance: the harness logs in as `mtest`, so prove that account
       # is absent from the image that was actually PUSHED — not from a local
