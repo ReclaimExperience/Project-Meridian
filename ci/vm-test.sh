@@ -8,8 +8,18 @@
 # is still needed, so that knowledge moved here rather than being rediscovered.
 set -euo pipefail
 
-ARCH="${1:?usage: ci/vm-test.sh <arch> <suite> [suite...]}"
+ARCH="${1:?usage: ci/vm-test.sh <arch> [--repeat N] <suite> [suite...]}"
 shift
+
+# The flaky-rate gate runs the same suite ten times. Repeat only the SUITE, not
+# the disk build: rebuilding each pass would make a 45-second check a 5-minute
+# one, and a gate nobody wants to run is a gate that stops being run.
+REPEAT=1
+if [[ "${1:-}" == "--repeat" ]]; then
+    REPEAT="${2:?--repeat needs a count}"
+    shift 2
+fi
+
 SUITES=("$@")
 [[ ${#SUITES[@]} -gt 0 ]] || SUITES=(smoke)
 
@@ -50,14 +60,26 @@ sudo chown -R "$(id -u):$(id -g)" build
 echo "::endgroup::"
 
 status=0
-for suite in "${SUITES[@]}"; do
-    echo "::group::vm-test ${suite}"
-    if ! just vm-test "$suite" "$ARCH"; then
-        echo "::error::harness suite '${suite}' failed on ${ARCH}"
-        status=1
-    fi
-    echo "::endgroup::"
+failures=0
+for pass in $(seq 1 "$REPEAT"); do
+    for suite in "${SUITES[@]}"; do
+        label="${suite}"
+        [[ "$REPEAT" -gt 1 ]] && label="${suite} (pass ${pass}/${REPEAT})"
+        echo "::group::vm-test ${label}"
+        if ! just vm-test "$suite" "$ARCH"; then
+            echo "::error::harness suite '${suite}' failed on ${ARCH} (pass ${pass}/${REPEAT})"
+            failures=$((failures + 1))
+            status=1
+        fi
+        echo "::endgroup::"
+    done
 done
+
+if [[ "$REPEAT" -gt 1 ]]; then
+    # The number that matters for PRD WP-03's flaky-rate gate. R-A treats flaky
+    # as broken, so this is a pass/fail count, not a percentage to interpret.
+    echo "flaky-rate: ${failures} failure(s) across ${REPEAT} consecutive pass(es)"
+fi
 
 echo "::group::evidence"
 find build/evidence -maxdepth 1 -type f 2>/dev/null | sort | sed 's/^/  /' || true

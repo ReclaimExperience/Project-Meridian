@@ -53,15 +53,8 @@ jobs:
           [ -n "$suites" ] || suites="smoke privacy security"
           repeat='${{ github.event.inputs.repeat }}'
           [ -n "$repeat" ] || repeat=1
-          failures=0
-          for run in $(seq 1 "$repeat"); do
-            echo "::group::pass ${run}/${repeat}"
-            # shellcheck disable=SC2086
-            bash ci/vm-test.sh x86_64 $suites || failures=$((failures + 1))
-            echo "::endgroup::"
-          done
-          echo "nightly: ${failures} failing pass(es) out of ${repeat}"
-          [ "$failures" -eq 0 ]
+          # shellcheck disable=SC2086
+          bash ci/vm-test.sh x86_64 --repeat "$repeat" $suites
 
       - name: Upload evidence
         if: always()
