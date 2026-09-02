@@ -21,6 +21,7 @@
     "version": { "const": 1 },
     "add": { "$ref": "#/$defs/packageList" },
     "remove": { "$ref": "#/$defs/packageList" },
+    "protect": { "$ref": "#/$defs/packageList" },
     "systemd": {
       "type": "object",
       "additionalProperties": false,

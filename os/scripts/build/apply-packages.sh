@@ -42,7 +42,10 @@ ITEM = re.compile(r"^(?P<indent> *)- +(?P<value>.+)$")
 # the lint workflow; the build path (build.yml -> ci/build.sh -> podman build)
 # never validates it, so the structure has to be enforced here too.
 REQUIRED_TOP = ("version", "add", "remove")
-KNOWN = {(): {"version", "add", "remove", "systemd"}, ("systemd",): {"mask", "disable"}}
+KNOWN = {
+    (): {"version", "add", "remove", "protect", "systemd"},
+    ("systemd",): {"mask", "disable"},
+}
 
 
 def die(lineno, line, why):
@@ -232,6 +235,17 @@ MASK_RAW="$(parse_key systemd.mask)"
 to_items "$MASK_RAW";    MASK=("${ITEMS[@]+"${ITEMS[@]}"}")
 DISABLE_RAW="$(parse_key systemd.disable)"
 to_items "$DISABLE_RAW"; DISABLE=("${ITEMS[@]+"${ITEMS[@]}"}")
+PROTECT_RAW="$(parse_key protect)"
+to_items "$PROTECT_RAW"; PROTECT=("${ITEMS[@]+"${ITEMS[@]}"}")
+
+# Removing anything without declaring what must survive is the configuration
+# that deleted the desktop. Fail closed rather than removing unprotected.
+if [[ ${#REMOVE[@]} -gt 0 && ${#PROTECT[@]} -eq 0 ]]; then
+    echo "apply-packages: ${MANIFEST} removes packages but declares no 'protect:' list." >&2
+    echo "                dnf takes dependents with it, so a removal can delete the" >&2
+    echo "                desktop and still exit 0. Name what must survive." >&2
+    exit 2
+fi
 
 echo "apply-packages: add=${#ADD[@]} remove=${#REMOVE[@]} mask=${#MASK[@]} disable=${#DISABLE[@]}"
 
@@ -264,22 +278,62 @@ if [[ ${#REMOVE[@]} -gt 0 ]]; then
     after_removal="$(mktemp)"
     rpm -qa --qf '%{NAME}\n' | sort -u > "$after_removal"
 
+    departed="$(mktemp)"
+    comm -23 "$before_removal" "$after_removal" > "$departed"
+
+    # --- the check that matters: did the desktop survive? -------------------
+    #
+    # Removing kmenuedit took plasma-desktop, plasma-workspace and sddm with it
+    # — an image with no desktop and no login screen — and the build reported
+    # EXIT=0. Checking that the LISTED packages are gone does not catch that;
+    # they were. It is the unlisted casualties that decide whether the thing
+    # still boots to a usable system.
+    protected="$(mktemp)"
+    printf '%s\n' "${PROTECT[@]}" | sort -u > "$protected"
+    lost="$(comm -12 "$departed" "$protected")"
+
+    # Everything else that went. Companion subpackages are normal and expected
+    # — removing firefox should take firefox-langpacks — so this is reported
+    # for the record, not treated as a failure. It is build evidence: a reviewer
+    # can see exactly what a one-line manifest edit actually deleted.
     wanted="$(mktemp)"
     printf '%s\n' "${REMOVE[@]}" | sort -u > "$wanted"
+    collateral="$(comm -23 "$departed" "$wanted")"
 
-    collateral="$(comm -23 <(comm -23 "$before_removal" "$after_removal") "$wanted")"
-    rm -f "$before_removal" "$after_removal" "$wanted"
+    # The opposite failure: a listed package that is still installed. dnf exits
+    # 0 having removed it and then reinstalled it to satisfy a Recommends —
+    # plasma-welcome survived two builds that way, so the OOBE wizard the
+    # removal existed to delete shipped anyway.
+    survived="$(comm -12 "$wanted" "$after_removal")"
+    rm -f "$before_removal" "$after_removal" "$departed" "$protected" "$wanted"
+
+    if [[ -n "$survived" ]]; then
+        echo >&2
+        echo "apply-packages: these were listed for removal and are STILL installed:" >&2
+        printf '%s\n' "$survived" | sed 's/^/    /' >&2
+        echo "    dnf exited 0, so something reinstalled them — usually a weak" >&2
+        echo "    dependency of a package in 'add:'." >&2
+        exit 1
+    fi
 
     if [[ -n "$collateral" ]]; then
+        echo "apply-packages: also removed as dependents of the above:"
+        printf '%s\n' "$collateral" | sed 's/^/    /'
+    fi
+
+    if [[ -n "$lost" ]]; then
         echo >&2
-        echo "apply-packages: removal took packages that were NOT listed:" >&2
-        printf '%s\n' "$collateral" | sed 's/^/    /' >&2
+        echo "apply-packages: a removal took PROTECTED packages with it:" >&2
+        printf '%s\n' "$lost" | sed 's/^/    /' >&2
         echo >&2
-        echo "    dnf removes everything that depends on a package. One of the" >&2
-        echo "    entries in packages.yml is dependency-locked, and forcing it out" >&2
-        echo "    took these with it." >&2
-        echo "    PRD WP-02: 'Escalate if a 3.2 removal is dependency-locked into" >&2
-        echo "    Plasma (document, propose substitute, wait).' Do not force it." >&2
+        echo "    These are named in the 'protect:' list of the manifest as" >&2
+        echo "    packages the image is not usable without. Something in" >&2
+        echo "    'remove:' is dependency-locked to them, and forcing it out" >&2
+        echo "    produces an image that builds cleanly and has no desktop." >&2
+        echo "    PRD WP-02: 'Escalate if a 3.2 removal is dependency-locked" >&2
+        echo "    into Plasma (document, propose substitute, wait).'" >&2
+        echo "    Mask or hide it instead (ADR-006 konsole precedent); do not" >&2
+        echo "    delete the protect entry to make this pass." >&2
         exit 1
     fi
 fi

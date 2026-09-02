@@ -92,6 +92,46 @@ remove:
   - htop               # Not in 3.2. plasma-systemmonitor is the visible one, and
                        # htop needs the terminal that INV-0 says nobody must open.
 
+# Packages the image is not usable without.
+#
+# This list is not about what to install — it is a tripwire. `dnf remove` takes
+# everything that DEPENDS on a package with it, so one line in `remove:` above
+# can delete the desktop while the build reports success. That happened: taking
+# out kmenuedit removed plasma-desktop, plasma-workspace and sddm, and the only
+# signal was EXIT=0 and a suspiciously short launcher.
+#
+# apply-packages.sh fails the build if a removal takes any of these. When it
+# fires, the answer is to stop removing that package — mask or hide it instead
+# (ADR-006's konsole precedent: hidden is not removed) — and NOT to delete the
+# entry from this list to get a green build.
+protect:
+  # --- the desktop and the way in -------------------------------------------
+  - plasma-desktop     # Without this there is no Plasma session at all.
+  - plasma-workspace
+  - kwin               # The compositor. No kwin, no windows.
+  - sddm               # No login screen means no way in, on a machine with no
+                       # terminal by design (INV-0).
+
+  # --- the things Pat's first hour depends on -------------------------------
+  - NetworkManager     # Wi-Fi. ADR-002's whole point is that hardware works.
+  - plasma-nm          # ...and the applet to choose a network without a terminal.
+  - pipewire           # Sound. A silent machine reads as a broken one.
+  - wireplumber
+  - xdg-desktop-portal-kde  # File pickers and permissions for Flatpak apps;
+                            # ADR-004 makes every app a Flatpak, so losing this
+                            # breaks the entire app set at once.
+  - flatpak            # ADR-004: the store and every app in it.
+
+  # --- boot, update and rollback --------------------------------------------
+  - systemd
+  - bootc              # ADR-001. Losing this makes the image un-updatable, and
+                       # the failure appears weeks later on someone's machine.
+  - ostree
+  - dracut             # No initramfs, no boot.
+  - greenboot          # ADR-008's automatic rollback; added in `add:` above.
+  - plasma-systemmonitor  # PRD 3.2's visible app, and the only way to see a
+                          # runaway process without the terminal INV-0 forbids.
+
 # Systemd units masked or disabled in the image.
 systemd:
   mask:

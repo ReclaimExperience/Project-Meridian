@@ -39,10 +39,11 @@ CANONICAL = {
     "empty lists": "version: 1\nadd: []\nremove: []\nsystemd:\n  mask: []\n  disable: []\n",
     "block lists": (
         "version: 1\nadd:\n  - haruna\n  - thermald\nremove:\n  - kmail\n"
+        "protect:\n  - plasma-desktop\n"
         "systemd:\n  mask:\n    - baloo_file.service\n  disable:\n    - foo.timer\n"
     ),
     "inline lists": (
-        "version: 1\nadd: [a, b, c]\nremove: [x]\n"
+        "version: 1\nadd: [a, b, c]\nremove: [x]\nprotect: [plasma-desktop]\n"
         "systemd:\n  mask: [m.service]\n  disable: []\n"
     ),
     "comments": (
@@ -105,6 +106,36 @@ MUST_REJECT = {
     "mapping under a list key": "version: 1\nadd:\n  sub:\n    - evil\nremove: []\n",
 }
 
+# `rpm` has to actually work now: apply-packages.sh snapshots the installed set
+# before and after the removal. A stub that prints nothing makes both snapshots
+# empty, so the cascade guard sees no casualties and passes vacuously — the
+# exact shape of pass this suite exists to prevent. This one reads a real file.
+RPM_STUB = """#!/bin/sh
+case "$1" in
+  -qa) cat "$RPM_DB" ;;
+  -q)  grep -qx "$2" "$RPM_DB" || { echo "package $2 is not installed"; exit 1; }
+       echo "$2" ;;
+esac
+exit 0
+"""
+
+# `dnf remove` that mutates the fake database AND applies a cascade map, because
+# taking dependents with it is the behaviour under test, not an edge case.
+DNF_CASCADE_STUB = """#!/bin/sh
+printf '%s %s\\n' "$(basename "$0")" "$*" >> "$STUB_LOG"
+case "$*" in
+  *remove*)
+    for pkg in "$@"; do
+      case "$pkg" in -*|remove|install) continue ;; esac
+      for victim in "$pkg" $(awk -v p="$pkg" '$1==p {print $2}' "$CASCADE_MAP"); do
+        grep -vx "$victim" "$RPM_DB" > "$RPM_DB.new" || true
+        mv "$RPM_DB.new" "$RPM_DB"
+      done
+    done ;;
+esac
+exit 0
+"""
+
 STUB = """#!/bin/sh
 # Records the call instead of touching a real system.
 printf '%s %s\\n' "$(basename "$0")" "$*" >> "$STUB_LOG"
@@ -118,6 +149,9 @@ def make_stubs(bindir: Path) -> None:
         stub = bindir / name
         stub.write_text(STUB)
         stub.chmod(0o755)
+    rpm = bindir / "rpm"
+    rpm.write_text(RPM_STUB)
+    rpm.chmod(0o755)
 
 
 def run_script(manifest: Path, bindir: Path, log: Path) -> tuple[int, str, str]:
@@ -187,6 +221,108 @@ def schema_valid(text: str) -> bool:
     except yaml.YAMLError:
         return False
     return not list(Draft202012Validator(schema).iter_errors(data))
+
+
+# Cascade scenarios. Each is (manifest, installed, cascade map, must_fail,
+# expected substring). These are regression tests for a build that reported
+# EXIT=0 while having deleted the entire desktop.
+CASCADES = {
+    "a removal that takes the desktop must fail the build": (
+        (
+            "version: 1\nadd: []\nremove: [kmenuedit]\n"
+            "protect: [plasma-desktop, sddm]\nsystemd:\n  mask: []\n  disable: []\n"
+        ),
+        ["kmenuedit", "plasma-desktop", "sddm", "kwin"],
+        "kmenuedit plasma-desktop\nkmenuedit sddm\n",
+        True,
+        "plasma-desktop",
+    ),
+    "ordinary companion subpackages are reported, not fatal": (
+        (
+            "version: 1\nadd: []\nremove: [firefox]\n"
+            "protect: [plasma-desktop]\nsystemd:\n  mask: []\n  disable: []\n"
+        ),
+        ["firefox", "firefox-langpacks", "plasma-desktop"],
+        "firefox firefox-langpacks\n",
+        False,
+        "firefox-langpacks",
+    ),
+    "a package that survives its own removal must fail the build": (
+        (
+            "version: 1\nadd: []\nremove: [plasma-welcome]\n"
+            "protect: [plasma-desktop]\nsystemd:\n  mask: []\n  disable: []\n"
+        ),
+        ["plasma-welcome", "plasma-desktop"],
+        "",  # no cascade, and the stub is told to remove nothing
+        True,
+        "STILL installed",
+    ),
+    "removing without a protect list must fail closed": (
+        (
+            "version: 1\nadd: []\nremove: [kmenuedit]\nprotect: []\n"
+            "systemd:\n  mask: []\n  disable: []\n"
+        ),
+        ["kmenuedit", "plasma-desktop"],
+        "",
+        True,
+        "no 'protect:' list",
+    ),
+}
+
+
+def run_cascades(tmpdir: Path) -> int:
+    """Drive the real script against a fake rpm database that cascades."""
+    failures = 0
+    print("\ncascade guards — a build must not delete the desktop and exit 0")
+    for name, (manifest_text, installed, cmap, must_fail, expect) in CASCADES.items():
+        bindir = tmpdir / "cascade-bin"
+        bindir.mkdir(exist_ok=True)
+        make_stubs(bindir)
+        # The inert dnf stub for the "survives its own removal" case: it logs
+        # and changes nothing, which is exactly what a weak-dep reinstall looks
+        # like from outside.
+        dnf = bindir / "dnf"
+        dnf.write_text(STUB if not cmap and "STILL" in expect else DNF_CASCADE_STUB)
+        dnf.chmod(0o755)
+
+        db = tmpdir / "rpmdb"
+        db.write_text("".join(f"{p}\n" for p in installed))
+        cascade_map = tmpdir / "cascade"
+        cascade_map.write_text(cmap)
+        manifest = tmpdir / "cascade.yml"
+        manifest.write_text(manifest_text)
+
+        env = dict(os.environ)
+        env["PATH"] = f"{bindir}:{env['PATH']}"
+        env["STUB_LOG"] = str(tmpdir / "cascade.log")
+        env["RPM_DB"] = str(db)
+        env["CASCADE_MAP"] = str(cascade_map)
+        result = subprocess.run(
+            ["bash", str(SCRIPT), str(manifest)],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        output = result.stdout + result.stderr
+        failed = result.returncode != 0
+
+        if failed != must_fail:
+            want = "fail" if must_fail else "succeed"
+            print(f"  FAIL  {name}")
+            print(f"      expected the script to {want}; it exited {result.returncode}")
+            print("      " + output.strip().replace("\n", "\n      "))
+            failures += 1
+        elif expect not in output:
+            print(f"  FAIL  {name}")
+            print(f"      exited {result.returncode} as expected, but never mentioned")
+            print(f"      {expect!r} — the operator cannot act on a failure they")
+            print("      cannot read.")
+            failures += 1
+        else:
+            verb = "refused" if must_fail else "allowed"
+            print(f"  ok    {name}  ({verb}, naming {expect!r})")
+    return failures
 
 
 def main() -> int:
@@ -269,12 +405,15 @@ def main() -> int:
                 )
                 print(f"  reject  {name}  ({reason.strip()})")
 
+        failures += run_cascades(tmpdir)
+
     if failures:
         print(f"\npackages-parser: {failures} failure(s)")
         return 1
     print(
         f"\npackages-parser: {len(CANONICAL)} canonical manifests act exactly as PyYAML "
-        f"reads them; {len(MUST_REJECT)} ambiguous ones are refused with no side effects"
+        f"reads them; {len(MUST_REJECT)} ambiguous ones are refused with no side "
+        f"effects; {len(CASCADES)} cascade scenario(s) behave correctly"
     )
     return 0
 
