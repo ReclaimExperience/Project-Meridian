@@ -20,7 +20,7 @@ Status: `TODO` | `IN PROGRESS` | `BLOCKED` | `DONE` | `WAIVED`
 | WP-00 | Repository bootstrap & conventions | 0 | S | low | none | DONE |
 | WP-01 | Base image: builds, boots, publishes | 0 | M | medium (external base) | WP-00 | DONE |
 | WP-02 | De-bloat & package curation | 0 | M | low | WP-01 | TODO |
-| WP-03 | VM test harness & story framework | 0 | L | medium | WP-01 (images to test) | IN PROGRESS |
+| WP-03 | VM test harness & story framework | 0 | L | medium | WP-01 (images to test) | DONE |
 | WP-04 | Update pipeline, rollback, signing | 0 | M | medium | WP-01 | TODO |
 | WP-05 | Theme core | 1 | L | medium | WP-02, 03 | TODO |
 | WP-06 | Boot & login: Plymouth, SDDM, silence | 1 | S | low | WP-05 (brand assets) | TODO |
@@ -418,7 +418,7 @@ Open, and deliberately not WP-01's to close:
 - No installable ISO exists yet — that is WP-16. Bare-metal testing on real
   hardware begins there and at WP-17/WP-25, not here.
 
-## WP-03 VM test harness — IN PROGRESS 2026-09-02 (agent run 1, slice 1 of ~6)
+## WP-03 VM test harness — DONE 2026-09-02 (agent run 1)
 
 **Delivered so far:** `tests/harness/` — `qmp.py` (screenshots, key/pointer
 injection, run state), `console.py` (bidirectional serial console = the
@@ -551,7 +551,7 @@ background noise: the day it goes green is the day that axis of WP-02 is done.
 | 1 | `just vm-test smoke` green locally (aarch64) **and in CI (x86_64)** | **MET, re-verified after the round-1 fixes.** Local: PASSED in 26 s, HVF. CI: PASSED in 50 s under **KVM**, 249 units OK, 0 failed units, full GUI login through SDDM — that run exercised the rewritten `Console.run` and the new negative pre-check |
 | 2 | deliberately-broken assertion produces useful artifacts | **MET.** A tinted baseline produced `RMSE 0.0666 exceeds 0.0300` plus a three-panel diff sheet |
 | 3 | `mtest` absent from any pushed image, while harness access works on the same digest locally | **MET, re-verified after the round-1 fixes.** The hardened `ci/check-no-test-user.sh` (sentinel + exit-status) passed against the **pushed** ref in the same CI run; the same digest logs in locally, because the account exists only in the local disk image. **Caveat:** on PRs the check runs against the `pr-NNN` tag, which PRD 7.4 permits to carry test credentials — only the push-to-`main` path validates `:testing` |
-| 4 | flaky-rate: smoke 10x consecutive green **in CI** | **PARTIAL.** 10/10 green locally, every pass 25 s ±1 s, 0 failures. The CI gate needs `nightly.yml` on the **default branch** — `workflow_dispatch` cannot target a feature branch — so it runs immediately after merge |
+| 4 | flaky-rate: smoke 10x consecutive green **in CI** | **MET.** First nightly run after merge: `flaky-rate: 0 failure(s) across 10 consecutive pass(es)` on x86_64 under KVM (run 33599815486). 10/10 green locally too, every pass 25 s ±1 s |
 
 `docs/testing.md` covers running suites, writing a story, re-baselining, and the
 two failure modes that have already cost time (systemd does not narrate the
@@ -670,3 +670,36 @@ job whose name is typed into a settings page. Each round the core held and the
 outermost layer did not. `tests/lint/wired.py` exists because that layer had
 nothing watching it at all; it is the first check in this repo whose subject is
 *the other checks*.
+
+## WP-03 closed — 2026-09-02
+
+All four acceptance items met. The last needed the merge itself:
+`workflow_dispatch` cannot target a feature branch, so the flaky-rate gate could
+only run once `nightly.yml` was on `main`. First run: **0 failures across 10
+consecutive passes** on x86_64 under KVM.
+
+**The nightly split works as designed.** Its first real run shows the gating step
+green and the ADR-015 step advisory-red with a warning — and the **sshd violation
+is now visible**, which it never was before: MJ-8's fix (collect both violations,
+assert once) means the second finding is no longer hidden behind the first.
+
+**Three review rounds, ~30 findings, one durable lesson.** Each round found the
+same defect class one layer further out: vacuous passes inside the suites, then
+in the layer around them, then in the composition of the gate itself. The answer
+to "can this check fail?" kept living outside the file being reviewed.
+`tests/lint/wired.py` is the response — the first check here whose subject is the
+other checks. It does not close the class (it verifies a check is *invoked*, not
+that its environment can run it — a gap that surfaced immediately when the lint
+job lacked Pillow), but it moves the boundary out one more step.
+
+**Open, stated, and owned:**
+
+- `security` is RED on two real ADR-015 violations — **WP-02's to fix** (issue #2).
+  **PRD 7.5's promote-to-stable gate cannot be satisfied until it is green**, so
+  no image can legitimately reach `:stable` before WP-02 lands.
+- `screens` cannot run in CI: only aarch64 baselines exist. x86_64 baselines must
+  be generated on an x86_64 runner and committed deliberately (R-F) — best done
+  with WP-05, when every baseline changes anyway.
+- `stories` is 0 of 22; each lands with the WP that ships its flow.
+- Not delivered, recorded rather than hidden: OCR text assertions, the vncdotool
+  input fallback, and the `perf` suite (blocked on WP-02's scripts).
