@@ -46,6 +46,12 @@ output="$(podman run --rm --entrypoint /bin/bash "$REF" -c "
     grep -h '^mtest:' /etc/passwd /usr/lib/passwd 2>/dev/null | sed 's/^/mtest in passwd file: /'
     ls -d /home/mtest /var/home/mtest 2>/dev/null | sed 's/^/mtest home: /'
     grep -rl mtest /usr/lib/systemd /etc/systemd 2>/dev/null | sed 's/^/systemd unit mentions mtest: /'
+    # sysusers.d is how a user is DECLARED on an ostree/bootc image, where
+    # /etc/passwd is regenerated on first boot — so an account can ship without
+    # ever appearing in the passwd files this probe was originally checking.
+    grep -rl mtest /usr/lib/sysusers.d /etc/sysusers.d 2>/dev/null | sed 's/^/sysusers.d declares mtest: /'
+    grep -h '^mtest:' /etc/shadow /usr/lib/shadow 2>/dev/null | sed 's/^/mtest in shadow: /'
+    grep -rl mtest /etc/sudoers.d /usr/lib/sudoers.d 2>/dev/null | sed 's/^/sudoers grants mtest: /'
     find / -name authorized_keys -not -path '/proc/*' 2>/dev/null | sed 's/^/authorized_keys: /'
     true
 " 2>&1)"

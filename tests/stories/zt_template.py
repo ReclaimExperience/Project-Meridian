@@ -24,7 +24,7 @@ Three rules, all from the PRD:
     never read as a broken product.
 
 Run them all:       just vm-test stories
-Run one story:      python3 tests/harness/run.py stories --keep   (then read the output)
+Debug a run:        python3 tests/harness/run.py stories --keep  (leaves the VM up)
 """
 
 from __future__ import annotations
@@ -49,7 +49,10 @@ def run(vm: VM, credentials: dict) -> None:
     console.wait_until(
         "systemctl is-active display-manager",
         # NOT endswith("active"): "inactive" ends with "active".
-        lambda out: out.strip().splitlines()[-1].strip() == "active",
+        # Any line, not the last: a kernel printk can land after the
+        # output on this console. And not endswith: "inactive" ends
+        # with "active". Empty output must not raise IndexError.
+        lambda out: any(ln.strip() == "active" for ln in out.splitlines()),
         timeout=300,
         description="display-manager to be active",
     )

@@ -31,6 +31,11 @@ DEFAULT_THRESHOLD = 0.03
 # mean anything. Chosen to leave room for a clock and a battery readout.
 MAX_MASKED_FRACTION = 0.25
 
+# And a ceiling on the threshold itself. Capping masks while leaving the
+# threshold unbounded just moves the bypass: `{"threshold": 1.0}` passes every
+# comparison. Anything above this is not a tolerance, it is a disabled check.
+MAX_THRESHOLD = 0.15
+
 
 @dataclass
 class ScreenConfig:
@@ -138,6 +143,21 @@ def compare(
     width, height = baseline.size
     masked_area = sum(w * h for _x, _y, w, h in config.masks)
     masked_fraction = masked_area / float(width * height)
+    if config.threshold > MAX_THRESHOLD:
+        return Comparison(
+            screen=screen,
+            rmse=float("nan"),
+            threshold=config.threshold,
+            passed=False,
+            baseline=baseline_path,
+            actual=actual_path,
+            message=(
+                f"{screen}: threshold {config.threshold} exceeds the "
+                f"{MAX_THRESHOLD} ceiling.\n"
+                f"  Above this a comparison is not tolerant, it is switched off."
+            ),
+        )
+
     if masked_fraction > MAX_MASKED_FRACTION:
         return Comparison(
             screen=screen,

@@ -109,9 +109,9 @@ def run(vm: VM, credentials: dict) -> None:
         print("security: no SSH daemon in the image (ADR-015)")
 
     assert not violations, (
-        "ADR-015 violation — non-loopback listeners that are not on the allowlist:\n  "
+        "ADR-015 violations:\n  "
         + "\n  ".join(violations)
-        + f"\n\nEither bind these to loopback, stop shipping them, or add them to\n"
+        + f"\n\nFor a LISTENER: bind it to loopback, stop shipping it, or add it to\n"
         f"{ALLOWLIST.relative_to(ROOT)} with a reason — that file is owner-gated,\n"
         f"because every line in it widens the attack surface of every machine."
     )

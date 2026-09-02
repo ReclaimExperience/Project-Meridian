@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run harness suites against a real booted image in CI (PRD 7.3 vm-test row).
 #
-#   ci/vm-test.sh <arch> <suite> [suite...]
+#   ci/vm-test.sh <arch> [--repeat N] <suite> [suite...]
 #
 # Replaces WP-01's boot-screenshot stopgap, which was a one-off photograph with
 # no assertions. Everything it did — KVM access, rootful transfer, disk build —
@@ -17,6 +17,14 @@ shift
 REPEAT=1
 if [[ "${1:-}" == "--repeat" ]]; then
     REPEAT="${2:?--repeat needs a count}"
+    # Validate the VALUE, not just its presence: `--repeat 0` produced an empty
+    # loop and exited 0, i.e. a green run that tested nothing — reachable from
+    # the nightly's free-text dispatch input. (BSD seq would run it twice: same
+    # missing validation, different symptom.)
+    if ! [[ "$REPEAT" =~ ^[1-9][0-9]*$ ]]; then
+        echo "ci/vm-test.sh: --repeat must be a positive integer, got '${REPEAT}'" >&2
+        exit 2
+    fi
     shift 2
 fi
 

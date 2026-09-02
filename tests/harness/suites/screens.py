@@ -19,6 +19,45 @@ from harness.vm import ROOT, VM
 BASELINES = ROOT / "tests" / "baselines"
 
 
+def _settle_screen(vm: VM, tries: int = 20, interval: float = 1.5) -> None:
+    """Block until two consecutive screenshots are identical.
+
+    The only honest way to know a desktop has finished drawing without asking
+    the desktop. A process existing does not mean it has painted, and capturing
+    mid-draw produces a diff that says "the theme changed" when nothing did.
+    """
+    import time
+
+    from harness import screendiff
+
+    previous = None
+    for attempt in range(tries):
+        current = vm.screenshot(f"_settle-{attempt}")
+        if previous is not None:
+            comparison = screendiff.compare(
+                "_settle",
+                current,
+                previous,
+                screendiff.ScreenConfig(threshold=0.001),
+                vm.evidence,
+            )
+            if comparison.passed:
+                previous.unlink(missing_ok=True)
+                current.unlink(missing_ok=True)
+                print(f"screens: settled after {attempt + 1} frame(s)")
+                return
+            previous.unlink(missing_ok=True)
+        previous = current
+        time.sleep(interval)
+    if previous is not None:
+        previous.unlink(missing_ok=True)
+    raise AssertionError(
+        f"the screen was still changing after {tries} frames "
+        f"({tries * interval:.0f}s). Capturing now would compare a half-drawn "
+        f"desktop against a settled baseline."
+    )
+
+
 def capture_screens(vm: VM, credentials: dict) -> dict[str, Path]:
     """Drive the image to each named screen and capture it.
 
@@ -34,7 +73,10 @@ def capture_screens(vm: VM, credentials: dict) -> dict[str, Path]:
     console.wait_until(
         "systemctl is-active display-manager",
         # NOT endswith("active"): "inactive" ends with "active".
-        lambda out: out.strip().splitlines()[-1].strip() == "active",
+        # Any line, not the last: a kernel printk can land after the
+        # output on this console. And not endswith: "inactive" ends
+        # with "active". Empty output must not raise IndexError.
+        lambda out: any(ln.strip() == "active" for ln in out.splitlines()),
         timeout=300,
         description="display-manager to be active",
     )
@@ -52,19 +94,18 @@ def capture_screens(vm: VM, credentials: dict) -> dict[str, Path]:
         timeout=420,
         description="plasmashell to start after the GUI login",
     )
-    # Let the shell finish painting before capturing. An earlier version polled
-    # `qdbus6 ... || echo settled`, whose `|| echo` guaranteed non-empty output —
-    # so the predicate was true on the first poll and the wait never waited.
-    # Wait on something that can actually be false: the panel process.
-    console.wait_until(
-        "pgrep -c plasmashell || true",
-        lambda out: (
-            out.strip().splitlines()[-1].strip().isdigit()
-            and int(out.strip().splitlines()[-1].strip()) >= 1
-        ),
-        timeout=120,
-        description="the panel to be up",
-    )
+    # Wait for the desktop to STOP CHANGING before capturing.
+    #
+    # Two previous attempts did not wait at all. `qdbus6 ... || echo settled`
+    # guaranteed non-empty output, so its predicate was true immediately; then
+    # `pgrep -c plasmashell >= 1` was true in exactly the states the wait above
+    # already required, so it also returned on the first poll. Both looked like
+    # waits and neither was.
+    #
+    # This waits on something neither of those guarantees and that genuinely
+    # starts false: consecutive screenshots being identical. A panel that is
+    # still painting differs frame to frame.
+    _settle_screen(vm)
     captured["desktop"] = vm.screenshot("screen-desktop")
 
     return captured

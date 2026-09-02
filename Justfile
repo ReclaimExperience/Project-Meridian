@@ -129,6 +129,8 @@ test-lint:
     @python3 tests/lint/test_packages_parser.py
     @echo
     @python3 tests/harness/test_pcap.py
+    @echo
+    @python3 tests/harness/test_suite_guards.py
 
 # ------------------------------------------------------------------ build ---
 

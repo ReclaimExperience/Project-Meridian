@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run a harness suite (PRD 7.4). Entry point for `just vm-test [suite]`.
 
-Suites live in tests/harness/suites/ and expose `run(vm) -> None`, raising
+Suites live in tests/harness/suites/ and expose `run(vm, credentials) -> None`, raising
 AssertionError on failure. The runner owns everything around them: finding the
 disk image, booting it, collecting evidence, and reporting.
 
@@ -21,7 +21,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from harness.vm import ROOT, VM, VMError, choose_accelerator, host_arch
+from harness.vm import ROOT, VM, choose_accelerator, host_arch
+
+# Every suite states its verdict with `assert`, so running under -O or
+# PYTHONOPTIMIZE=1 strips them all and turns the harness into a rubber stamp:
+# every suite "passes", having checked nothing. Refuse to start rather than
+# report a green result that means nothing.
+if not __debug__:
+    raise SystemExit(
+        "harness: refusing to run with assertions disabled (-O / PYTHONOPTIMIZE).\n"
+        "  Every suite's verdict is an `assert`, so this mode would report a\n"
+        "  green result for a system it never checked."
+    )
 
 SUITES = ("smoke", "security", "privacy", "screens", "stories")
 
@@ -127,7 +138,11 @@ def main() -> int:
             _write_baselines(vm, credentials, module, args.baseline)
         else:
             module.run(vm, credentials)
-    except (AssertionError, VMError, Exception) as exc:  # noqa: BLE001
+    except BaseException as exc:  # noqa: BLE001
+        # BaseException, not Exception: SystemExit and KeyboardInterrupt would
+        # otherwise escape and exit 0 with no verdict printed — and
+        # `raise SystemExit(...)` is this file's own idiom for user errors, so a
+        # suite adopting it is plausible.
         failure = exc
     finally:
         elapsed = time.monotonic() - started

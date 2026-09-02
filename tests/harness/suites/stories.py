@@ -42,14 +42,22 @@ def run(vm: VM, credentials: dict) -> None:
 
     failures = []
     for path in paths:
-        module = load(path)
+        # Import inside the try: a story with a bad import previously aborted
+        # every story after it, which is the opposite of what the comment below
+        # promises.
+        try:
+            module = load(path)
+        except BaseException as exc:  # noqa: BLE001
+            print(f"stories:   FAIL  {path.stem}: could not be imported: {exc}")
+            failures.append(f"{path.stem}: import failed: {exc}")
+            continue
         title = getattr(module, "STORY", path.stem)
         owner = getattr(module, "OWNER_WP", "unknown WP")
         print(f"\nstories: {title}   [{owner}]")
         try:
             module.run(vm, credentials)
             print(f"stories:   PASS  {path.stem}")
-        except Exception as exc:  # noqa: BLE001 — one story must not stop the rest
+        except BaseException as exc:  # noqa: BLE001 — one story must not stop the rest
             print(f"stories:   FAIL  {path.stem}: {exc}")
             traceback.print_exc()
             failures.append(f"{title} [{owner}]: {exc}")

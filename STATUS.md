@@ -548,9 +548,9 @@ background noise: the day it goes green is the day that axis of WP-02 is done.
 
 | # | Criterion | Status |
 |---|---|---|
-| 1 | `just vm-test smoke` green locally (aarch64) **and in CI (x86_64)** | **MET.** Local: PASSED in 25 s, HVF. CI: PASSED in 41 s under **KVM**, 244 units OK, 0 failed units, full GUI login through SDDM |
+| 1 | `just vm-test smoke` green locally (aarch64) **and in CI (x86_64)** | **MET, re-verified after the round-1 fixes.** Local: PASSED in 26 s, HVF. CI: PASSED in 50 s under **KVM**, 249 units OK, 0 failed units, full GUI login through SDDM — that run exercised the rewritten `Console.run` and the new negative pre-check |
 | 2 | deliberately-broken assertion produces useful artifacts | **MET.** A tinted baseline produced `RMSE 0.0666 exceeds 0.0300` plus a three-panel diff sheet |
-| 3 | `mtest` absent from any pushed image, while harness access works on the same digest locally | **MET.** `ci/check-no-test-user.sh` passed against the **pushed** ref in CI; the same digest logs in locally, because the account exists only in the local disk image |
+| 3 | `mtest` absent from any pushed image, while harness access works on the same digest locally | **MET, re-verified after the round-1 fixes.** The hardened `ci/check-no-test-user.sh` (sentinel + exit-status) passed against the **pushed** ref in the same CI run; the same digest logs in locally, because the account exists only in the local disk image. **Caveat:** on PRs the check runs against the `pr-NNN` tag, which PRD 7.4 permits to carry test credentials — only the push-to-`main` path validates `:testing` |
 | 4 | flaky-rate: smoke 10x consecutive green **in CI** | **PARTIAL.** 10/10 green locally, every pass 25 s ±1 s, 0 failures. The CI gate needs `nightly.yml` on the **default branch** — `workflow_dispatch` cannot target a feature branch — so it runs immediately after merge |
 
 `docs/testing.md` covers running suites, writing a story, re-baselining, and the
@@ -607,3 +607,32 @@ whole zone.
 attacked hard and held; the defects were all one layer out, in the code that
 decides whether to report success. **Check the outermost layer first — it is the
 one that turns everything else into a claim.**
+
+## WP-03 review round 2 — both blockers held; the class moved one layer out again
+
+Second independent review. **Both round-1 blockers verified fixed under attack**
+(10 synthetic captures against the real `privacy.run`; 8 stub-podman cases plus
+real `probe-clean`/`probe-dirty` images built for `check-no-test-user.sh`), and
+`Console.run`'s new sentinel protocol survived seven attacks including the exact
+self-match it was written to prevent. But **MJ-6 was NOT fixed**, and five new
+defects sat in the same outermost-layer class.
+
+| ID | What was wrong | Fix |
+|---|---|---|
+| NEW-1 (major) | **`PYTHONOPTIMIZE=1` made every suite pass vacuously.** Every verdict is a bare `assert`, so one inherited environment variable turned the machinery every later WP's acceptance rests on into a rubber stamp. Demonstrated: a suite whose body is `assert False` exited **0** under `-O`. | The runner refuses to start with assertions disabled. |
+| NEW-2 (major) | **MJ-6 was not fixed.** The replacement predicate (`pgrep -c plasmashell >= 1`) is true in exactly the states the wait above it already required, so it returned on the first poll — the second wait in a row that looked like a wait and was not. STATUS claimed it fixed. | Waits until two consecutive screenshots are identical — something that genuinely starts false. Observed: *"settled after 3 frame(s)"*, and both screens now compare at RMSE 0.0000. |
+| NEW-3 (major) | The credential probe **missed `sysusers.d`** — the idiomatic way to declare a user on a bootc image, where `/etc/passwd` is regenerated on first boot. A planted `probe-sysusers` image reported clean. | Also greps `sysusers.d`, `shadow`, `sudoers.d`. |
+| NEW-4 (major) | The nightly ran `security` — documented as expected-red — in the **same job** as `smoke` and `privacy`, so a real regression in either was invisible inside a permanently red job, and **PRD 7.5's promote-to-stable gate ("nightly green 2 consecutive days") was unsatisfiable by construction.** | Split: a gating job for `smoke`+`privacy`, and a separate ADR-015 job that reports loudly and does not gate. **Promote-to-stable remains blocked until WP-02** — that is now stated in the job output rather than implied. |
+| NEW-5 (major) | **Neither blocker fix had a regression test**, so both could be silently reopened. "Proven both ways" was a one-time manual claim with no committed artifact. | `tests/harness/test_suite_guards.py` covers BL-1, BL-2 and NEW-1, needs no VM, and runs in `just test-lint`. |
+| NEW-6..NEW-14 | `--repeat 0` ran nothing and exited 0; the `is-active` predicate crashed on empty output and was defeated by a trailing printk; `SystemExit` escaped the runner and exited 0; a story failing at *import* aborted every later story; `from typing import Self` needs 3.11 while the PRD 7.2 Mac path has 3.9; masks were capped but the **threshold was not**; the merged ADR-015 assert mislabelled the sshd finding; stale docstrings. | All fixed. |
+
+**Two things the owner should know.** PRD 7.5's promote-to-stable gate cannot be
+met until WP-02 removes LLMNR and sshd — not a harness problem, but now
+explicit. And on pull requests the credential check validates the `pr-NNN` tag,
+which PRD 7.4 explicitly permits to carry test credentials; only the push-to-
+`main` path checks `:testing`.
+
+**The pattern, third occurrence:** round 1 found vacuous passes inside the
+suites, round 2 found them in the layer around the suites — the runner's exit
+paths, the CI job structure, and the interpreter mode. Each round the core held
+and the outermost layer did not. **When reviewing a gate, start at the outside.**
