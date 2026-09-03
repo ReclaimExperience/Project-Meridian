@@ -720,7 +720,27 @@ Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
   Removing the OSK or `xwaylandvideobridge` for RAM is forbidden, and both are now
   in `protect:` rather than in prose. Commissioned separately: the OSK starts only
   where a touchscreen exists.
-- **ADR-017 implemented and measured. The OSK trim works; the gate is MARGINAL,
+- **ADR-018 adopted (2026-09-03): protocol, two-tier gating, budget re-set, OSK
+  rework.** Third evidence-driven budget amendment (ISO first, ADR-017 second).
+  The product metric is now the **median of 3 full boots**, all three recorded —
+  one run with ~50 MiB of noise was deciding a gate with under 4 MiB of headroom.
+  `ram.idle.product` re-set to **1200 MiB** (target 1100) from the measured
+  post-trim floor plus one noise-spread; **950 is reclassified as an aspiration
+  that gates nothing**, contingent on the clause 5 investigation. Offset 186.5
+  adopted with provenance, so `ram.idle.ci` = **1386.5**, still computed and never
+  stored. A **relative ratchet** on summed userspace PSS (baseline 576, +25 MiB)
+  is now the creep detector, because a gate slack enough not to be a coin flip is
+  slack enough to hide steady growth.
+- **The OSK trim was reworked because the shipped one was unsafe.** It wrote
+  `/etc/xdg/kwinrc`, a system-wide default the greeter's own kwin also reads, so a
+  late-detected digitizer could have suppressed the keyboard at the **login
+  screen** — an owner unable to type their password. The rework is session-scope
+  only (nothing writes to `/etc`, structurally asserted in test), enable is eager
+  and sticky on any touchscreen sighting including hotplug via udev marker,
+  disable is lazy, and Automatic/Always/Off is the user's to set.
+  **Ships to `:testing` on that structural safety; `:stable` for this feature is
+  gated on the now-mandatory touch seat in 10.2.**
+- **Superseded: ADR-017's result — the trim works; the gate was MARGINAL,
   not met.** `plasma-keyboard` no longer runs on a touchless machine: GPU idle
   RAM fell 1242.0 → mean 1139.9 MiB, llvmpipe ~1424 → 1326.4. But three GPU runs
   on the same image gave **1123.1 / 1122.4 / 1174.1** — two pass, one fails, with

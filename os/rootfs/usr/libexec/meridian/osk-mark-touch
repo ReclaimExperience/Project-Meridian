@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Record a touchscreen sighting (ADR-018 §6). Called from udev, so it must be
+# fast, must never block, and must never fail the device's processing.
+set -euo pipefail
+MARKER=/var/lib/meridian/touchscreen-seen
+[[ -e "$MARKER" ]] && exit 0
+mkdir -p "$(dirname "$MARKER")"
+printf 'seen=%s\ndevice=%s\n' "$(date -Is)" "${DEVPATH:-unknown}" > "$MARKER"

@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""The on-screen-keyboard trim, driven against real udev output shapes.
+"""The on-screen keyboard's session-scope mechanism (ADR-018 clause 6).
 
-ADR-017 clause 5 asks for the OSK to start only where there is a touchscreen.
-Clause 4 forbids removing it. So the script has to get the HARDWARE QUESTION
-right, and the two ways of being wrong are not symmetric:
+The version this replaces wrote `/etc/xdg/kwinrc` — a SYSTEM-WIDE KConfig
+default that the greeter's own kwin also reads. On a machine whose digitizer is
+detected late, or attached after boot, that could have suppressed the keyboard at
+the LOGIN SCREEN, where the failure mode is not an awkward session but an owner
+who cannot type their password. It was measured for its memory saving and shipped
+without that interaction being tested at all.
 
-    wrong on a touchless desktop  ->  72 MiB wasted, nobody notices
-    wrong on a touch-only tablet  ->  the owner cannot type their password
+So the assertions here are ordered by what actually matters:
 
-Which means the interesting test is not "does it disable the keyboard" — it is
-"does it refuse to disable the keyboard whenever it is not certain". A run with
-no udevadm, an empty device database, or a database listing no input devices at
-all must leave Plasma's default alone. Absence of evidence is not evidence of
-absence, and here the difference is someone locked out of their machine.
-
-Drives the real script with a stubbed `udevadm`, against a temporary kwinrc.
+  1. **Nothing ever writes to /etc.** Structural, checked against the source, and
+     the reason this mechanism is safe to ship before a touch seat exists.
+  2. Enable is eager and sticky; disable is lazy. One sighting of a touchscreen
+     is enough, forever — being wrong towards a keyboard nobody needs costs
+     72 MiB, being wrong the other way costs someone their computer.
+  3. The user's choice wins over both.
 """
 
 from __future__ import annotations
@@ -26,129 +27,167 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "os" / "rootfs" / "usr" / "libexec" / "meridian" / "osk-autoconfig"
+LIBEXEC = ROOT / "os" / "rootfs" / "usr" / "libexec" / "meridian"
+SESSION = LIBEXEC / "osk-session-config"
+MARK = LIBEXEC / "osk-mark-touch"
+UDEV = (
+    ROOT
+    / "os"
+    / "rootfs"
+    / "usr"
+    / "lib"
+    / "udev"
+    / "rules.d"
+    / "70-meridian-touchscreen.rules"
+)
+USER_UNIT = (
+    ROOT
+    / "os"
+    / "rootfs"
+    / "usr"
+    / "lib"
+    / "systemd"
+    / "user"
+    / "meridian-osk-session.service"
+)
 
-TOUCH_DB = """P: /devices/pci0000:00/0000:00:14.0/usb1/1-3/1-3:1.0/0003:04F3:24A1.0001
-E: ID_INPUT=1
-E: ID_INPUT_TOUCHSCREEN=1
-E: NAME="ELAN Touchscreen"
-"""
-
-NO_TOUCH_DB = """P: /devices/platform/i8042/serio0/input/input3
-E: ID_INPUT=1
-E: ID_INPUT_KEYBOARD=1
-E: NAME="AT Translated Set 2 keyboard"
-P: /devices/platform/i8042/serio1/input/input5
-E: ID_INPUT=1
-E: ID_INPUT_TOUCHPAD=1
-"""
-
-# A database with no input devices at all. Something is wrong with the query,
-# not with the hardware — so this must NOT be read as "no touchscreen".
-NO_INPUTS_DB = """P: /devices/pci0000:00/0000:00:1f.2
-E: ID_MODEL=SSD
-"""
-
-CASES = [
-    ("touchscreen present", TOUCH_DB, 0, False, "keyboard left enabled"),
-    ("keyboard and touchpad only", NO_TOUCH_DB, 0, True, "keyboard disabled"),
-    ("database lists no input devices", NO_INPUTS_DB, 0, False, "left alone: unsure"),
-    ("udevadm fails", "", 1, False, "left alone: unsure"),
-    ("udevadm returns nothing", "", 0, False, "left alone: unsure"),
-]
+OSK = "org.kde.plasma.keyboard.desktop"
 
 
-def run_case(tmp: Path, db: str, rc: int, existing: str | None) -> tuple[int, str, str]:
+def run_session(tmp: Path, mode: str | None, marker: bool) -> tuple[int, str, str]:
+    """Drive the real script with a fake HOME, marker and kwriteconfig6."""
+    home = tmp / "home"
+    (home / ".config" / "meridian").mkdir(parents=True, exist_ok=True)
+    if mode is not None:
+        (home / ".config" / "meridian" / "osk.conf").write_text(mode + "\n")
+    else:
+        (home / ".config" / "meridian" / "osk.conf").unlink(missing_ok=True)
+
+    marker_dir = tmp / "var" / "lib" / "meridian"
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    marker_path = marker_dir / "touchscreen-seen"
+    if marker:
+        marker_path.write_text("seen=now\n")
+    else:
+        marker_path.unlink(missing_ok=True)
+
     bindir = tmp / "bin"
     bindir.mkdir(exist_ok=True)
-    stub = bindir / "udevadm"
-    stub.write_text(f"#!/bin/sh\ncat <<'DB'\n{db}\nDB\nexit {rc}\n")
-    stub.chmod(0o755)
+    # A kwriteconfig6 that records what it was asked to write.
+    (bindir / "kwriteconfig6").write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$KW_LOG"\nexit 0\n'
+    )
+    (bindir / "kwriteconfig6").chmod(0o755)
+    log = tmp / "kw.log"
+    log.unlink(missing_ok=True)
 
-    kwinrc = tmp / "kwinrc"
-    if existing is None:
-        kwinrc.unlink(missing_ok=True)
-    else:
-        kwinrc.write_text(existing)
-
-    env = dict(os.environ)
-    env["PATH"] = f"{bindir}:{env['PATH']}"
-    # The script writes /etc/xdg/kwinrc; point it at a temp file for the test.
-    source = SCRIPT.read_text().replace("KWINRC=/etc/xdg/kwinrc", f"KWINRC={kwinrc}")
-    driver = tmp / "osk-autoconfig"
+    source = SESSION.read_text().replace(
+        "MARKER=/var/lib/meridian/touchscreen-seen", f"MARKER={marker_path}"
+    )
+    driver = tmp / "osk-session-config"
     driver.write_text(source)
     driver.chmod(0o755)
 
+    env = dict(os.environ)
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["HOME"] = str(home)
+    env["XDG_CONFIG_HOME"] = str(home / ".config")
+    env["KW_LOG"] = str(log)
     result = subprocess.run(
         ["bash", str(driver)], capture_output=True, text=True, env=env, check=False
     )
-    written = kwinrc.read_text() if kwinrc.exists() else ""
+    written = log.read_text() if log.exists() else ""
     return result.returncode, result.stdout + result.stderr, written
 
 
-def disabled(text: str) -> bool:
-    return "InputMethod=" in text and "InputMethod=org" not in text
+def keyboard_on(written: str) -> bool:
+    return OSK in written
 
 
 def main() -> int:
     failures = 0
+
+    # --- 1. the structural property, which is why this can ship early -------
+    print("the greeter must be structurally out of reach")
+    sources = {p.name: p.read_text() for p in (SESSION, MARK)}
+    sources["udev rule"] = UDEV.read_text()
+    sources["user unit"] = USER_UNIT.read_text()
+    for name, text in sources.items():
+        # CODE only. These files talk about /etc in their comments, on purpose:
+        # they explain what the superseded mechanism did and why it was unsafe.
+        # Forbidding the explanation along with the behaviour would delete the
+        # reason the rework exists, and the next person would rediscover it the
+        # expensive way.
+        code = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("#")
+        )
+        touches_etc = "/etc/" in code
+        print(f"  {'FAIL' if touches_etc else 'ok  '}  {name} never writes under /etc")
+        if touches_etc:
+            offending = [ln for ln in code.splitlines() if "/etc/" in ln]
+            for line in offending:
+                print(f"      {line.strip()}")
+        failures += 1 if touches_etc else 0
+    unit = sources["user unit"]
+    is_user_unit = "systemd/user" in str(USER_UNIT)
+    print(
+        f"  {'ok  ' if is_user_unit else 'FAIL'}  it is a USER unit, in the session's own scope"
+    )
+    failures += 0 if is_user_unit else 1
+    if "WantedBy=plasma-workspace.target" not in unit:
+        print("  FAIL  the unit is not wanted by any target, so it never runs")
+        failures += 1
+    else:
+        print("  ok    the unit is actually pulled in by plasma-workspace.target")
+
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
 
-        print("hardware detection — when may the keyboard be turned off?")
-        for name, db, rc, want_disabled, why in CASES:
-            code, output, written = run_case(tmp, db, rc, None)
-            got = disabled(written)
-            if code != 0:
-                print(f"  FAIL  {name}: script exited {code}")
-                print("      " + output.strip().replace("\n", "\n      "))
+        # --- 2. eager and sticky enable, lazy disable ----------------------
+        print("\nautomatic: one touchscreen sighting is enough, forever")
+        for marker, want_on, why in [
+            (True, True, "a machine that has seen a touchscreen keeps the keyboard"),
+            (False, False, "a machine that never has does not carry it"),
+        ]:
+            code, _output, written = run_session(tmp, None, marker)
+            got = keyboard_on(written)
+            ok = code == 0 and got == want_on
+            print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
+            if not ok:
+                print(f"      exit={code} wrote={written.strip()!r}")
                 failures += 1
-            elif got != want_disabled:
-                print(f"  FAIL  {name}: expected {why}")
-                print(f"      kwinrc is now {written!r}")
-                if got:
-                    print("      It DISABLED the on-screen keyboard without")
-                    print("      establishing there is no touchscreen. On a tablet")
-                    print("      that is a machine nobody can log in to.")
-                failures += 1
-            else:
-                print(f"  ok    {name} -> {why}")
 
-        print("\nthe decision must be revisited, not sticky")
-        # A machine that gains a touchscreen (docked 2-in-1, replaced panel) must
-        # get its keyboard back, so a previous disable has to be removed again.
-        code, output, written = run_case(tmp, TOUCH_DB, 0, "[Wayland]\nInputMethod=\n")
-        if disabled(written):
-            print(
-                "  FAIL  a previously-written disable survived a touchscreen appearing"
-            )
-            print(f"      kwinrc is still {written!r}")
+        # --- 3. the user's choice beats the hardware, both ways ------------
+        print("\nthe user's choice wins over the hardware")
+        for mode, marker, want_on, why in [
+            ("always", False, True, "'Always' keeps it on a touchless desktop"),
+            ("off", True, False, "'Off' turns it off even on a tablet"),
+            ("automatic", True, True, "'Automatic' follows the hardware"),
+        ]:
+            code, _output, written = run_session(tmp, mode, marker)
+            got = keyboard_on(written)
+            ok = code == 0 and got == want_on
+            print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
+            if not ok:
+                print(f"      exit={code} wrote={written.strip()!r}")
+                failures += 1
+
+        # --- 4. it writes the SESSION's kwinrc, not a system one -----------
+        print("\nscope")
+        code, _output, written = run_session(tmp, "always", False)
+        if ".config/kwinrc" not in written:
+            print(f"  FAIL  it did not target the session kwinrc: {written.strip()!r}")
             failures += 1
         else:
-            print("  ok    an earlier disable is removed when a touchscreen appears")
-
-        print("\nuser choice is never overwritten")
-        code, output, written = run_case(
-            tmp,
-            NO_TOUCH_DB,
-            0,
-            "[Wayland]\nInputMethod=org.kde.plasma.keyboard.desktop\n",
-        )
-        if "org.kde.plasma.keyboard.desktop" not in written:
-            print("  FAIL  it removed an explicit InputMethod someone had set.")
-            print("      Turning the keyboard on is a choice a person can make;")
-            print("      a memory optimisation must not silently undo it.")
-            failures += 1
-        else:
-            print("  ok    an explicitly configured keyboard is left in place")
+            print("  ok    it writes the session's own kwinrc")
 
     print()
     if failures:
-        print(f"osk-autoconfig: {failures} failure(s)")
+        print(f"osk-session: {failures} failure(s)")
         return 1
     print(
-        f"osk-autoconfig: {len(CASES)} detection case(s); disables only on proven "
-        "absence, and never overrides a person's choice"
+        "osk-session: nothing writes under /etc, enable is sticky, disable is lazy, "
+        "and the user's choice wins"
     )
     return 0
 

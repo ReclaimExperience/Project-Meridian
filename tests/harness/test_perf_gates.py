@@ -31,6 +31,7 @@ from harness.suites.perf import (
     _parse_systemd_analyze,
     _verdict,
     idle_ram_budget,
+    median,
 )
 
 # Real shapes. systemd omits stages that did not happen (no firmware line on
@@ -196,8 +197,8 @@ def main() -> int:
             failures += 1
         else:
             print(f"  ok    PRD states {needle!r}")
-    if product_gate != 1126 or BUDGETS["boot_seconds"]["gate"] != 15:
-        print("  FAIL  budgets.json does not match the PRD (1126 MiB, 15 s).")
+    if product_gate != 1200 or BUDGETS["boot_seconds"]["gate"] != 15:
+        print("  FAIL  budgets.json does not match the PRD (1200 MiB, 15 s).")
         print("      R-E: budgets are laws. Changing one needs an ADR, not an edit.")
         failures += 1
     else:
@@ -217,6 +218,81 @@ def main() -> int:
             print("      overwrites with its own verdict. Pick another name.")
             failures += 1
     print("  ok    no suite writes under the runner's report name")
+
+    # --- ADR-018 clause 1: the protocol ------------------------------------
+    print("\nADR-018 — the median of 3, because one noisy run is a coin flip")
+    # The real 2026-09-03 values. Two of the three pass the OLD 1126 gate and one
+    # does not, which is exactly the case the protocol exists to make legible.
+    observed = [1123.1, 1122.4, 1174.1]
+    for values, want, why in [
+        (observed, 1123.1, "the real marginal result medians to its middle value"),
+        ([10.0, 1.0, 5.0], 5.0, "unsorted input is sorted first"),
+        ([2.0, 4.0], 3.0, "an even count averages the middle pair"),
+        ([7.0], 7.0, "a single run is its own median"),
+    ]:
+        got = median(values)
+        ok = abs(got - want) < 0.001
+        print(f"  {'ok  ' if ok else 'FAIL'}  {why} ({values} -> {got})")
+        failures += 0 if ok else 1
+
+    proto = BUDGETS["protocol"]
+    for ok, why in [
+        (proto["runs"] == 3, "the protocol is 3 runs (ADR-018 clause 1)"),
+        (proto["statistic"] == "median", "the statistic is the median"),
+        (proto["settle_seconds"] == 120, "the 2-minute settle is preserved"),
+    ]:
+        print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
+        failures += 0 if ok else 1
+
+    # --- ADR-018 clause 2: the budget re-set, and its provenance -------------
+    print("\nADR-018 — an absolute budget is only as good as its floor evidence")
+    product = BUDGETS["idle_ram"]["product"]
+    floor = product.get("floor_provenance", {})
+    for ok, why in [
+        (product["gate_mib"] == 1200, "the gate is 1200 MiB"),
+        (product["target_mib"] == 1100, "the target is 1100 MiB"),
+        (
+            product.get("aspiration_mib") == 950,
+            "950 survives as an ASPIRATION, not a gate (clause 2)",
+        ),
+        (
+            floor.get("measured_runs_mib") == observed,
+            "the floor cites the runs it was derived from",
+        ),
+        (
+            product["gate_mib"] > max(observed),
+            (
+                "the gate clears the worst observed run — otherwise it is "
+                "still a coin flip"
+            ),
+        ),
+        (
+            product["gate_mib"] - floor.get("mean_mib", 0)
+            >= floor.get("noise_spread_mib", 0) * 0.9,
+            "headroom is about one observed noise-spread (clause 2's basis)",
+        ),
+    ]:
+        print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
+        failures += 0 if ok else 1
+
+    # --- ADR-018 clause 3: the creep detector -------------------------------
+    print("\nADR-018 — the relative ratchet is the creep detector")
+    ratchet = BUDGETS.get("userspace_pss", {})
+    slack = product["gate_mib"] - floor.get("mean_mib", 0)
+    for ok, why in [
+        (ratchet.get("allowed_delta_mib") == 25, "the ratchet allows +25 MiB"),
+        (ratchet.get("baseline_mib") == 576, "the post-trim baseline is recorded"),
+        (bool(ratchet.get("acknowledgement_marker")), "there is an ack marker"),
+        (
+            ratchet.get("allowed_delta_mib", 0) < slack,
+            (
+                "the ratchet is TIGHTER than the absolute gate's slack — "
+                "otherwise it detects nothing the gate would not already catch"
+            ),
+        ),
+    ]:
+        print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
+        failures += 0 if ok else 1
 
     print()
     if failures:

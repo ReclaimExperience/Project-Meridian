@@ -38,7 +38,8 @@ BUDGETS = json.loads(
     (Path(__file__).resolve().parents[2] / "perf" / "budgets.json").read_text()
 )
 
-SETTLE_SECONDS = 120
+SETTLE_SECONDS = BUDGETS["protocol"]["settle_seconds"]
+PROTOCOL_RUNS = BUDGETS["protocol"]["runs"]
 
 # Processes an ADR says must not be running once the desktop is idle, and why.
 # This belongs to the perf suite because "is it running" and "what does idle
@@ -323,81 +324,90 @@ def measure(vm: VM, credentials: dict) -> dict:
     }
 
 
-def run(vm: VM, credentials: dict, only: str | None = None) -> None:
-    """Measure both, then apply the gates.
+def median(values: list[float]) -> float:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
 
-    `only` lets tests/perf/idle_ram.sh and boot_time.sh each enforce one budget
-    while paying for a single boot. Both numbers are always MEASURED and always
-    recorded — narrowing the gate must never narrow the evidence, or the
-    unreported number is free to drift.
+
+def apply_gates(measurements: list[dict], vm: VM, only: str | None = None) -> None:
+    """Judge the PROTOCOL statistic, not a single boot (ADR-018 clause 1).
+
+    Every value is recorded, not just the median. A build sitting on the line
+    must read as sitting on the line: the 2026-09-03 result was 1123.1 / 1122.4 /
+    1174.1, and reporting any one of those alone would have been a fair summary
+    of nothing.
     """
-    results = measure(vm, credentials)
+    stat = BUDGETS["protocol"]["statistic"]
+    assert stat == "median", f"unsupported protocol statistic {stat!r}"
 
-    ram_gate, ram_target, ram_name = idle_ram_budget(
-        bool(results.get("software_rendering"))
+    ram_values = [m["idle_ram_mib"] for m in measurements]
+    boot_values = [m["boot_seconds"] for m in measurements]
+    software = bool(measurements[-1].get("software_rendering"))
+    pss_values = [m.get("pss_total_visible_mib", 0.0) for m in measurements]
+
+    ram = median(ram_values)
+    boot = median(boot_values)
+    pss = median(pss_values)
+
+    ram_gate, ram_target, ram_name = idle_ram_budget(software)
+    results = {
+        "protocol": {
+            "runs": len(measurements),
+            "statistic": stat,
+            "idle_ram_mib_runs": ram_values,
+            "boot_seconds_runs": boot_values,
+            "userspace_pss_mib_runs": pss_values,
+            "spread_mib": round(max(ram_values) - min(ram_values), 1),
+        },
+        "idle_ram_mib": round(ram, 1),
+        "boot_seconds": round(boot, 2),
+        "userspace_pss_mib": round(pss, 1),
+        "software_rendering": software,
+        "idle_ram_budget_name": ram_name,
+        "idle_ram_gate_mib": ram_gate,
+        "idle_ram_target_mib": ram_target,
+        "measurements": measurements,
+    }
+
+    print(
+        f"perf: protocol = {stat} of {len(measurements)} run(s); "
+        f"idle RAM {ram_values} -> {ram:.1f} MiB (spread "
+        f"{results['protocol']['spread_mib']} MiB)"
     )
-    results["idle_ram_budget_name"] = ram_name
-    results["idle_ram_gate_mib"] = ram_gate
-    results["idle_ram_target_mib"] = ram_target
-    if ram_name == "ram.idle.ci":
+    if software:
         offset = BUDGETS["idle_ram"]["render_offset"]
-        results["render_offset_mib"] = offset["value_mib"]
         print(
             f"perf: gating on {ram_name} = {ram_gate} MiB "
-            f"({BUDGETS['idle_ram']['product']['gate_mib']} product "
-            f"+ {offset['value_mib']} render offset, ADR-017)."
+            f"({BUDGETS['idle_ram']['product']['gate_mib']} product + "
+            f"{offset['value_mib']} render offset, ADR-017)."
         )
         print("perf: this is the TRIPWIRE, not the product number. A green run here")
         print("perf: does not support a claim about idle RAM on real hardware.")
     else:
         print(f"perf: gating on {ram_name} = {ram_gate} MiB (GPU-rendered, ADR-017)")
 
-    checks = {
-        "idle_ram_mib": (
-            "idle RAM",
-            results["idle_ram_mib"],
-            " MiB",
-            {
-                "gate": ram_gate,
-                "target": ram_target,
-                "conditions": f"{ram_name}, ADR-017",
-            },
-        ),
-        "boot_seconds": ("boot time", results["boot_seconds"], "s", None),
-    }
-    print(f"perf: boot breakdown {results['boot_breakdown']}")
-    print(f"perf: RAM measured in a {results['mem_total_mib']:.0f} MiB VM")
-    if results.get("software_rendering"):
-        print(
-            "perf: NOTE — the guest is rendering in SOFTWARE. Some of the idle\n"
-            "perf:        RAM below is llvmpipe's tile buffers, which a machine\n"
-            "perf:        with a real GPU driver does not allocate."
-        )
-    if results.get("cgroup_slices_mib"):
-        print(f"perf: by slice {results['cgroup_slices_mib']}")
-    if results.get("top_processes_pss_mib"):
-        print("perf: by PSS (shared pages divided among mappers; these ~sum):")
-        for entry in results["top_processes_pss_mib"][:12]:
-            print(f"perf:   {entry['mib']:>7.1f} MiB  {entry['comm']}")
-        print(
-            f"perf:   {results['pss_total_visible_mib']:>7.1f} MiB  "
-            "= total of the processes visible to this user"
-        )
-    else:
-        print("perf: PSS unavailable; RSS below OVERSTATES per-process cost")
-        for entry in results.get("top_processes_mib", [])[:12]:
-            print(f"perf:   {entry['mib']:>7.1f} MiB  {entry['comm']} (RSS)")
-
     failures = []
-    for name, detail in results.get("forbidden_running", {}).items():
+    for name, detail in measurements[-1].get("forbidden_running", {}).items():
         print(f"perf: {name} is RUNNING and must not be")
         failures.append(
             f"{name} is running at idle.\n  {FORBIDDEN_AT_IDLE[name]}\n"
             f"  guest said: {detail}"
         )
-    if not results.get("forbidden_running"):
+    if not measurements[-1].get("forbidden_running"):
         print(f"perf: none of {sorted(FORBIDDEN_AT_IDLE)} are running (as required)")
 
+    checks = {
+        "idle_ram_mib": (
+            "idle RAM",
+            ram,
+            " MiB",
+            {"gate": ram_gate, "target": ram_target, "conditions": ram_name},
+        ),
+        "boot_seconds": ("boot time", boot, "s", BUDGETS["boot_seconds"]),
+    }
     for key, (label, measured, unit, budget) in checks.items():
         ok, message = _verdict(key, measured, unit, budget)
         print(f"perf: {label} {'ok' if ok else 'OVER GATE'} — {message}")
@@ -405,10 +415,49 @@ def run(vm: VM, credentials: dict, only: str | None = None) -> None:
         if not ok and (only is None or only == key):
             failures.append(f"{label}: {message}")
 
-    # NOT "perf-<arch>": run.py writes the per-run verdict under
-    # "<suite>-<arch>.json", so that name collides and the runner's report - the
-    # one written last - silently replaced every measurement this suite took.
-    # The first over-budget run lost its own breakdown that way.
+    # --- ADR-018 clause 3: the creep detector -------------------------------
+    ratchet = BUDGETS["userspace_pss"]
+    delta = pss - ratchet["baseline_mib"]
+    results["userspace_pss_delta_mib"] = round(delta, 1)
+    results["userspace_pss_baseline_mib"] = ratchet["baseline_mib"]
+    if delta > ratchet["allowed_delta_mib"]:
+        print(
+            f"perf: userspace PSS {pss:.1f} MiB is {delta:.1f} MiB over the "
+            f"{ratchet['baseline_mib']} MiB baseline"
+        )
+        results["userspace_pss_over"] = True
+        if only is None or only == "userspace_pss":
+            failures.append(
+                f"userspace PSS rose {delta:.1f} MiB over baseline "
+                f"({ratchet['baseline_mib']} MiB), past the "
+                f"{ratchet['allowed_delta_mib']} MiB the ratchet allows.\n"
+                "  This is the creep detector (ADR-018 clause 3), not the absolute\n"
+                "  gate — the absolute gate has enough slack to miss steady growth,\n"
+                "  which is exactly why this exists.\n"
+                f"  If the increase is intended, acknowledge it in the PR body with\n"
+                f"  '{ratchet['acknowledgement_marker']} <reason>' saying what was\n"
+                "  bought for it. Passing this by explaining is allowed; passing it\n"
+                "  silently is not."
+            )
+    else:
+        print(
+            f"perf: userspace PSS {pss:.1f} MiB, {delta:+.1f} vs baseline "
+            f"(ratchet allows +{ratchet['allowed_delta_mib']})"
+        )
+        results["userspace_pss_over"] = False
+
     vm.write_report(f"perf-budgets-{vm.arch}", results)
     if failures:
         raise AssertionError("\n".join(failures))
+
+
+def run(vm: VM, credentials: dict, only: str | None = None) -> None:
+    """Single-boot entry point, for callers that hand us one already-booted VM.
+
+    ADR-018 clause 1 wants the median of three FULL boots, for the CI
+    measurement as well as the product one, and only run.py can arrange that —
+    so it calls apply_gates() directly. This path judges one sample and says so
+    in the evidence (`protocol.runs == 1`), which is right for debugging a
+    single VM and wrong for deciding a gate.
+    """
+    apply_gates([measure(vm, credentials)], vm, only=only)

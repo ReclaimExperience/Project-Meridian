@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Choose the on-screen keyboard for THIS SESSION only (ADR-018 §6).
+#
+# Supersedes the boot-time mechanism shipped on 2026-09-03, which wrote
+# /etc/xdg/kwinrc — a SYSTEM-WIDE KConfig default that the greeter's own kwin
+# also reads. On a machine whose digitizer is detected late, that could suppress
+# the keyboard at the LOGIN SCREEN, where the failure is not an awkward session
+# but an owner who cannot type their password. Nothing here writes to /etc, and
+# the greeter never reads what it writes.
+#
+# Three states, and the user's choice always wins:
+#
+#   Always     the keyboard is on, wherever you are
+#   Off        the keyboard is off, even on a tablet
+#   Automatic  on if this machine has ever had a touchscreen  (default)
+#
+# "has ever had" is deliberate. Enable is eager and sticky — one sighting is
+# enough, forever — because being wrong towards a keyboard nobody needs costs
+# 72 MiB, and being wrong the other way costs someone the use of their computer.
+set -euo pipefail
+
+MARKER=/var/lib/meridian/touchscreen-seen
+PREF_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/meridian/osk.conf"
+KWINRC="${XDG_CONFIG_HOME:-$HOME/.config}/kwinrc"
+OSK=org.kde.plasma.keyboard.desktop
+
+mode=automatic
+if [[ -r "$PREF_FILE" ]]; then
+    read -r mode < "$PREF_FILE" || mode=automatic
+    mode="${mode//[[:space:]]/}"
+fi
+
+case "$mode" in
+    always) want="$OSK" ;;
+    off)    want="" ;;
+    *)
+        # Automatic. Absence of the marker is only ever read as "no touchscreen
+        # yet"; if anything about the check is uncertain we leave the keyboard on,
+        # because the two errors are not equally bad.
+        if [[ -e "$MARKER" ]] || [[ ! -d "$(dirname "$MARKER")" ]]; then
+            want="$OSK"
+        else
+            want=""
+        fi
+        ;;
+esac
+
+if command -v kwriteconfig6 >/dev/null 2>&1; then
+    kwriteconfig6 --file "$KWINRC" --group Wayland --key InputMethod "$want"
+else
+    # No kwriteconfig6 is not a reason to guess at INI editing in a way that
+    # could corrupt a user's kwinrc. Leave Plasma's default alone and say so.
+    echo "meridian-osk: kwriteconfig6 unavailable; leaving the keyboard at" >&2
+    echo "meridian-osk: Plasma's default rather than editing kwinrc by hand." >&2
+    exit 0
+fi
+echo "meridian-osk: mode=${mode} InputMethod=${want:-<none>} (session scope)"

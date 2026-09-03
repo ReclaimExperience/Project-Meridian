@@ -97,6 +97,62 @@ def _write_baselines(vm, credentials, module, which: str) -> None:
     print("baseline: with a STATUS.md note saying what changed and why (rule R-F).")
 
 
+def _perf_protocol(args, disk, credentials, module, started) -> int:
+    """Boot N times, measure each, then judge the median (ADR-018 clause 1).
+
+    Gates are applied ONCE, to the statistic. Applying them per run would turn
+    three runs into three chances to fail, which is the opposite of what the
+    protocol is for — the 2026-09-03 result was 1123.1 / 1122.4 / 1174.1, and
+    any single one of those is a fair summary of nothing.
+    """
+    measurements = []
+    last_vm = None
+    for index in range(args.runs):
+        print(f"\nharness: protocol run {index + 1}/{args.runs}")
+        vm = VM(disk=disk, arch=args.arch)
+        try:
+            vm.start()
+            measurements.append(module.measure(vm, credentials))
+        except BaseException as exc:  # noqa: BLE001
+            # A protocol run that did not complete must not be silently dropped:
+            # medianing the two that worked would report a clean number from a
+            # partly broken measurement.
+            vm.stop()
+            print(f"harness: protocol run {index + 1} FAILED: {exc}")
+            print(f"harness: FAILED after {time.monotonic() - started:.0f}s")
+            return 1
+        if index + 1 < args.runs:
+            vm.stop()
+        else:
+            last_vm = vm
+
+    failure = None
+    try:
+        module.apply_gates(measurements, last_vm, only=args.only)
+    except BaseException as exc:  # noqa: BLE001
+        failure = exc
+    finally:
+        elapsed = time.monotonic() - started
+        last_vm.write_report(
+            f"{args.suite}-{args.arch}",
+            {
+                "suite": args.suite,
+                "protocol_runs": args.runs,
+                "seconds": round(elapsed, 1),
+                "passed": failure is None,
+                "error": None if failure is None else str(failure),
+            },
+        )
+        last_vm.stop()
+
+    if failure is not None:
+        print(f"\n{failure}")
+        print(f"\nharness: FAILED after {elapsed:.0f}s")
+        return 1
+    print(f"\nharness: PASSED after {elapsed:.0f}s")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a VM harness suite.")
     parser.add_argument("suite", nargs="?", default="smoke", choices=SUITES)
@@ -114,6 +170,15 @@ def main() -> int:
         const="all",
         help="capture screens and WRITE them as baselines instead of comparing "
         "(rule R-F: this is deliberate, and belongs in its own commit)",
+    )
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=None,
+        help="perf only: how many protocol runs to take before judging. "
+        "Defaults to the protocol in budgets.json — ADR-018 clause 1 requires "
+        "the median of 3, for the CI measurement as well as the product one. "
+        "Lower it only to debug the harness, never to decide a gate.",
     )
     parser.add_argument(
         "--only",
@@ -137,6 +202,19 @@ def main() -> int:
     print(f"harness: disk={disk}")
 
     started = time.monotonic()
+
+    # ADR-018 clause 1: the product metric is the median of 3 consecutive runs.
+    # Each run is a FULL boot, not three samples from one — the noise being
+    # averaged out lives in boot-to-boot variation of kernel and system memory,
+    # so re-reading /proc/meminfo three times in one session would measure
+    # nothing and report confidence.
+    protocol_runs = args.runs
+    if args.suite == "perf" and protocol_runs is None:
+        protocol_runs = module.PROTOCOL_RUNS
+    args.runs = protocol_runs
+    if args.suite == "perf" and (protocol_runs or 1) > 1:
+        return _perf_protocol(args, disk, credentials, module, started)
+
     # The privacy suite audits traffic, so it needs the capture enabled at boot
     # — it cannot be turned on once the VM is already running.
     vm = VM(disk=disk, arch=args.arch, capture=args.suite == "privacy")

@@ -80,8 +80,9 @@ Meridian OS is built for exactly this person. Not for gamers (Bazzite exists), n
 | Unattended-install success on the reference hardware matrix | ≥ 95% of attempts | Section 10.2 matrix runs |
 | Zero-Terminal story pass rate | 22/22 stories | Section 10.1 in CI + manual |
 | "Parent test": non-technical human completes the 10-task script unaided | ≥ 9/10 tasks, ≥ 4/5 testers | Moderated sessions, M5 |
-| **`ram.idle.product`** — idle RAM after login, GPU-rendered (2-min settle, 4 GB) | ≤ 1.1 GiB / 1126 MiB (target 950 MiB) | `tests/perf/idle_ram.sh` on the 10.2 low-end row (ADR-017) |
-| **`ram.idle.ci`** — the same, measured on the llvmpipe CI VM | `ram.idle.product` + `render_offset` (today: 1308 MiB, target 1132) | `tests/perf/idle_ram.sh` in CI — a **tripwire**, not a release claim (ADR-017) |
+| **`ram.idle.product`** — idle RAM after login, GPU-rendered, **median of 3 runs** (2-min settle each) | ≤ 1200 MiB (target 1100; 950 is an *aspiration*, gating nothing — ADR-018 §2) | `tests/perf/idle_ram.sh` on the 10.2 low-end row (ADR-017, ADR-018) |
+| **`ram.idle.ci`** — the same, measured on the llvmpipe CI VM | `ram.idle.product` + `render_offset` — computed, never stored (today: 1386.5 MiB) | `tests/perf/idle_ram.sh` in CI — a **tripwire**, not a release claim (ADR-017) |
+| **Userspace PSS ratchet** — summed userspace PSS vs a rolling baseline | ≤ +25 MiB over the median of the last 10 main-branch nightlies, unless acknowledged in the PR with a reason | The **creep detector** (ADR-018 §3): the absolute gate has slack by construction and cannot see steady growth |
 | Cold boot, power-on → login screen (virtio SSD VM) | ≤ 15 s (target 10 s) | `tests/perf/boot_time.sh` in CI |
 | Login → usable desktop | ≤ 5 s | same harness |
 | ISO size | ≤ 3.5 GiB (target 3.0) | CI artifact check |
@@ -510,6 +511,8 @@ Phase 0 · Depends: WP-01 · Parallel-safe: WP-03, 04 · Risk: low · Size: M ·
 **Objective:** The image contains exactly the 3.2 manifest — nothing else that draws pixels or burns RAM.
 **Deliverables:** `os/packages.yml` populated: remove (Discover + PackageKit stack, Akonadi/PIM, Baloo (or masked if dep-locked — record which), KDE games/extras, plasma-welcome, konversation/kmail-anything, ublue-branded extras `[list at execution from rpm -qa diff]`); add (haruna, print-manager, sane-airscan backends, fonts per 4.1/3.2, toolbox/distrobox, tuned-ppd, thermald, greenboot); systemd preset file disabling/masking: baloo, kwallet-pam prompts for our flow, anything phoning home found by audit; `tests/perf/idle_ram.sh` + `boot_time.sh` (first real perf tests, callable standalone pre-WP-03).
 **Steps:** boot base → inventory (`rpm -qa`, `systemctl list-units`, `flatpak list`) committed to `docs/inventory-before.txt` → iterate removals in packages.yml (bootc build cycle) → verify nothing user-visible broke (apps menu audit vs 3.2 list) → record after-inventory + RAM delta.
+**Commissioned investigation (ADR-018 §5, S-size, knowledge only, gates nothing):** Xwayland on-demand feasibility `[VERIFY kwin support]`; a kded module audit; KRunner preload. This is the legitimate path toward the 1100 target — the 950 aspiration is contingent on what it finds, and "it found nothing" is an acceptable result to be written down rather than quietly dropped.
+
 **Acceptance:** idle RAM ≤ 1.1 GiB gate passes on x86_64 KVM 4 GB VM (report number in STATUS.md; target 950 MiB — if > gate, escalate, don't hide); app launcher shows only 3.2's visible set (screenshot); `systemctl --failed` empty; no `.desktop` entries from removed stacks; `docs/inventory-after.txt` committed.
 **Forbidden:** removing anything ADR-002's driver stack provides (drivers/codecs stay even if "unused" in VM); removing konsole (hidden ≠ removed, ADR-006).
 **Escalate if:** a 3.2 removal is dependency-locked into Plasma (document, propose substitute, wait).
@@ -852,7 +855,7 @@ Phase 0 ≈ 11 sessions · Phase 1 ≈ 17 · Phase 2 ≈ 22 · Phase 3 ≈ 16 ·
 | Win10-refugee laptop | ThinkPad T480 or similar 8th-gen | The canonical switcher laptop |
 | Modern mainstream laptop | 2022+ Ryzen or 12th-gen Intel, Wi-Fi 6 | Sam's class; s2idle + brightness + webcam |
 | Low-end constraint | 4 GB RAM Celeron/Pentium laptop, eMMC | Floor honesty (ADR-013). **Canonical seat for `ram.idle.product` (ADR-017).** |
-| Touch-equipped laptop | Any 2-in-1 or touchscreen laptop | ADR-017 clause 5: the on-screen keyboard starts only when a touchscreen is present, so this is the only row that can prove it still appears when it should. A touchless machine cannot fail that check. |
+| Touch-equipped laptop **(mandatory)** | Any 2-in-1 or touchscreen laptop | ADR-018 §6: the on-screen keyboard is automatic on touch hardware, and this is the only row that can prove it still appears when it should — a touchless machine cannot fail that check. The reworked trim ships to `:testing` on structural greeter safety (nothing writes to `/etc`, the greeter reads none of it); **verification on this seat gates `:stable` for the feature.** |
 | Nvidia desktop | GTX 16xx AND RTX 30xx+ | ADR-012 both driver generations |
 | Trouble-hardware seat | One Broadcom-Wi-Fi Mac or similar | Driver-stack proof |
 | VMs | UTM/aarch64 (dev loop), QEMU-KVM x86_64 (CI), plus one VirtualBox+VMware smoke | Where users will "try it first" |
