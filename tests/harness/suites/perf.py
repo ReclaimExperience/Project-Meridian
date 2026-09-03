@@ -250,7 +250,8 @@ def measure(vm: VM, credentials: dict) -> dict:
     # about it.
     _status, meminfo = console.run(
         "grep -E '^(MemTotal|MemAvailable|MemFree|Cached|Buffers|Slab|"
-        "SReclaimable|SUnreclaim|AnonPages|PageTables):' /proc/meminfo",
+        "SReclaimable|SUnreclaim|AnonPages|PageTables|Shmem|KernelStack|"
+        "Mapped|Dirty):' /proc/meminfo",
         timeout=60,
     )
     fields = {
@@ -325,12 +326,39 @@ def measure(vm: VM, credentials: dict) -> dict:
             "SUnreclaim",
             "AnonPages",
             "PageTables",
+            "Shmem",
+            "KernelStack",
+            "Mapped",
+            "Dirty",
         )
         if key in fields
     }
 
+    # ADR-019 §1's candidate statistic: the claim on Pat's 4 GiB that cannot be
+    # handed to the browser without swapping. File cache can be reclaimed and
+    # will be; counting it made three structurally identical runs differ by
+    # 75.4 MiB. Recorded alongside the old metric, gating nothing until the
+    # clause 0 trigger says whether the cache account actually holds.
+    COMMITTED_KEYS = ("AnonPages", "Shmem", "SUnreclaim", "KernelStack", "PageTables")
+    missing_committed = [k for k in COMMITTED_KEYS if k not in fields]
+    if missing_committed:
+        raise AssertionError(
+            f"/proc/meminfo did not report {missing_committed}, so the committed "
+            "statistic cannot be computed. Refusing to report a partial sum under "
+            "a name that means a specific set of fields.\n"
+            f"  guest said: {meminfo.strip()!r}"
+        )
+    committed_mib = sum(fields[k] for k in COMMITTED_KEYS) / 1024
+    reclaimable_mib = (
+        fields.get("Cached", 0)
+        + fields.get("Buffers", 0)
+        + fields.get("SReclaimable", 0)
+    ) / 1024
+
     return {
         "idle_ram_mib": round(used_mib, 1),
+        "committed_mib": round(committed_mib, 1),
+        "reclaimable_mib": round(reclaimable_mib, 1),
         "memory_composition_mib": composition,
         "mem_total_mib": round(fields["MemTotal"] / 1024, 1),
         "boot_seconds": round(boot["total"], 2),
@@ -372,6 +400,7 @@ def apply_gates(measurements: list[dict], vm: VM, only: str | None = None) -> No
     software = bool(measurements[-1].get("software_rendering"))
     pss_values = [m.get("pss_total_visible_mib", 0.0) for m in measurements]
 
+    committed_values = [m["committed_mib"] for m in measurements]
     ram = median(ram_values)
     boot = median(boot_values)
     pss = median(pss_values)
@@ -384,6 +413,8 @@ def apply_gates(measurements: list[dict], vm: VM, only: str | None = None) -> No
             "idle_ram_mib_runs": ram_values,
             "boot_seconds_runs": boot_values,
             "userspace_pss_mib_runs": pss_values,
+            "committed_mib_runs": [m.get("committed_mib") for m in measurements],
+            "reclaimable_mib_runs": [m.get("reclaimable_mib") for m in measurements],
             "spread_mib": round(max(ram_values) - min(ram_values), 1),
         },
         "idle_ram_mib": round(ram, 1),
@@ -396,10 +427,22 @@ def apply_gates(measurements: list[dict], vm: VM, only: str | None = None) -> No
         "measurements": measurements,
     }
 
+    committed_spread = round(max(committed_values) - min(committed_values), 1)
+    results["committed_mib"] = round(median(committed_values), 1)
+    results["protocol"]["committed_spread_mib"] = committed_spread
     print(
         f"perf: protocol = {stat} of {len(measurements)} run(s); "
         f"idle RAM {ram_values} -> {ram:.1f} MiB (spread "
         f"{results['protocol']['spread_mib']} MiB)"
+    )
+    # ADR-019 clause 0's trigger, printed where the decision is made.
+    print(
+        f"perf: committed {committed_values} -> {results['committed_mib']:.1f} MiB "
+        f"(spread {committed_spread} MiB)"
+    )
+    print(
+        f"perf: ADR-019 §0 trigger — committed spread {committed_spread} MiB "
+        f"{'<=' if committed_spread <= 25 else '>'} 25 MiB threshold"
     )
     if software:
         offset = BUDGETS["idle_ram"]["render_offset"]
