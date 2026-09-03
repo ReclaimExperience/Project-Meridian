@@ -720,7 +720,23 @@ Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
   Removing the OSK or `xwaylandvideobridge` for RAM is forbidden, and both are now
   in `protect:` rather than in prose. Commissioned separately: the OSK starts only
   where a touchscreen exists.
-- **Original finding: over by 116 MiB, not ~300.** Measured both ways on
+- **ADR-017 implemented and measured. The OSK trim works; the gate is MARGINAL,
+  not met.** `plasma-keyboard` no longer runs on a touchless machine: GPU idle
+  RAM fell 1242.0 → mean 1139.9 MiB, llvmpipe ~1424 → 1326.4. But three GPU runs
+  on the same image gave **1123.1 / 1122.4 / 1174.1** — two pass, one fails, with
+  a spread of 51.7 MiB against under 4 MiB of headroom. R-A treats flaky as
+  broken, so **idle-RAM acceptance is NOT recorded as met.**
+  The variance is not the desktop: the failing run's user-visible PSS was *lower*
+  than a passing run's (573.8 vs 577.7). It is system/kernel memory plus
+  `MemAvailable`'s own heuristics. **This is a protocol gap** — ADR-017 specifies
+  the settle but not a repeat count, so one noisy run decides a gate near the
+  line. Proposed to the owner (issue #32): median of 3 for the product metric.
+  Not implemented; changing how a gate decides is not an agent's call.
+  The render offset survived the trim — 186.5 measured vs 182 recorded, +2.5%,
+  well inside clause 3's 25%. Deliberately **not** updated: adjusting a
+  calibration constant while reporting a marginal failure is indistinguishable
+  from tuning the gate to pass.
+- **Earlier finding, now superseded: over by 116 MiB, not ~300.** Measured both ways on
   the same image: **1242 MiB with a GPU** (`MERIDIAN_VM_GL=1`, virgl) vs ~1424 MiB
   mean with software rendering. The 182 MiB difference is llvmpipe's tile buffers,
   which no machine with a working GPU driver allocates — 155 MiB of it inside
