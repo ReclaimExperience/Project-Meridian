@@ -42,12 +42,25 @@ jobs:
       - name: Prepare runner storage
         run: bash ci/prepare-runner.sh
 
-      # Rootful, because the BUILD is rootful — see "Build and push".
+      # BOTH stores, and the second one is not redundant.
+      #
+      # The build is rootful (see "Build and push"), so root needs the credentials
+      # to push. But `check-no-test-user.sh` runs ROOTLESS and, now that the image
+      # is no longer in the runner user's store, has to PULL the published image
+      # to inspect it — which is what that check always claimed to do. Our
+      # packages are not anonymously pullable, so without a rootless login that
+      # pull fails and the check reports "could not obtain the image".
+      #
+      # Logging in rootful only is exactly the regression that produced a red
+      # build-aarch64: the change that moved the build to root was reasoned about
+      # in the half where the image is written, and not in the half where it is
+      # read back.
       - name: Log in to GHCR
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         run: |
           # --password-stdin: a token passed as -p is visible in /proc.
           echo '${{ secrets.GITHUB_TOKEN }}' | sudo podman login ghcr.io -u '${{ github.actor }}' --password-stdin
+          echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
 
       # PR images go to a throwaway pr-NNN tag; main goes to :testing. Nothing
       # here ever writes :stable — that is the weekly promote gate's job (7.5).
