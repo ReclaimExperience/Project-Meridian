@@ -84,15 +84,62 @@ for and good news must not bury it.
 Images are cosign-signed in CI (ADR-014). `os/rootfs/etc/containers/policy.json`
 is the client half — without it the signing is theatre, since nothing checks it.
 
-The scoped rule requires a signature for our repository. The **default is
-permissive on purpose**: this ships before the key exists, and a policy that
-rejects everything produces an unbootable machine rather than a secure one. It
-tightens when signing is live and the negative test passes — an unsigned or
-wrong-key image must be **refused**, and until that test exists the enforcement
-is unproven whatever the file says.
+**ADR-022 chose keyless signing** (GitHub OIDC / Sigstore) so that no long-lived
+private key would exist. Its VERIFY found the client cannot express it:
+containers-common 0.67.0's `fulcio` stanza supports only `oidcIssuer`,
+`subjectEmail`, `caPath` and `caData`, while GitHub Actions OIDC certificates
+carry the workflow identity in a URI SAN and have no email SAN. So the
+pre-authorized fallback is in force — a cosign key pair.
 
-PRD WP-04 specifies `usr/etc/containers/policy.json`. That path cannot be built:
-`bootc container lint` rejects `/usr/etc`, as WP-01 already found and recorded.
+`ci/verify-signing-policy.sh` runs on every build and re-asks that question. **If
+it ever reports that identity pinning is available, retire the key**: the reason
+to prefer keyless — no key to custody, rotate, or leak — has not gone away.
+
+### Where the key lives
+
+- **Public half:** `os/rootfs/etc/pki/containers/meridian.pub`, shipped in the
+  image. ECDSA P-256, SHA-256 fingerprint `920fc4c6…53a5896e`.
+- **Private half:** the `COSIGN_PRIVATE_KEY` secret on the **`release` GitHub
+  Environment**, behind **required reviewers**. That protection is not
+  decoration: it means a human approves every signature, so a compromised
+  workflow cannot sign on its own. It is the only thing that makes holding a key
+  tolerable after keyless was ruled out.
+- Pull requests never reach the `sign` job, so a fork PR cannot touch the key.
+
+Signing is **by digest, never by tag**. A tag is a moving pointer; signing
+`:testing` would attest "whatever that name points at right now", which is
+precisely what an attacker moves.
+
+### Rotating the key
+
+1. `cosign generate-key-pair` on a trusted machine, outside the repository.
+2. Replace `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD` on the `release`
+   environment.
+3. Commit the new `cosign.pub` to `os/rootfs/etc/pki/containers/meridian.pub`.
+4. **Re-sign the current `:stable` digest with the new key before shipping the
+   new public key**, or installed machines will reject the image they are already
+   running from. The public key reaches them in an update; the signature it must
+   verify was made before that update existed.
+5. Run the negative test.
+
+### The negative test is the gate
+
+`ci/negative-test-signing.sh` asserts three things, in order: that the policy
+rejects *something* (a positive control — otherwise the rest is noise), that the
+signed image is **accepted**, and that an unsigned image **in our namespace** is
+**refused**. It finds its own unsigned reference: PRs push `pr-*` tags and never
+reach the signing job.
+
+Skipping the third assertion **fails** the script. Runs 1 and 2 show the policy
+accepts what it should, not that it refuses what it must, and a gate satisfied by
+its positive cases alone is not a gate.
+
+**"Negative test green" is a hard gate on the first `:stable` image** (ADR-022,
+promote gate 7.5). Until then the permissive default in `policy.json` is an
+honest description of a development state, not a lapse.
+
+**Still unverified:** whether `bootc upgrade` honours `policy.json` at all. That
+needs a booted machine and applies equally to keyless or key-pair signing.
 
 ## Channels and promotion (PRD §7.5, §7.6)
 

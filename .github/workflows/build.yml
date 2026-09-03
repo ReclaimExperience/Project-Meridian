@@ -133,3 +133,57 @@ jobs:
             build/evidence/*.json
             build/evidence/serial-*.log
           if-no-files-found: warn
+
+  # Signing runs as its OWN job, gated on the `release` Environment's required
+  # reviewers (ADR-022). Two consequences, both intended:
+  #
+  #   * a human approves every signature, so a compromised workflow cannot sign
+  #     on its own — which is the only thing that makes holding a private key
+  #     tolerable after ADR-022's VERIFY ruled out keyless;
+  #   * pull requests never reach it, so a fork PR cannot touch the key.
+  #
+  # main only. `:stable` is promoted by retag (PRD 7.5) and is signed as part of
+  # that gate, not here.
+  sign:
+    name: sign
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: sigstore/cosign-installer@v3
+      - name: Install skopeo
+        run: sudo apt-get install -y -qq skopeo
+      - name: Log in to GHCR
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | skopeo login ghcr.io -u '${{ github.actor }}' --password-stdin
+      - name: Sign the published images
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          image="$(python3 -c "import json;d=json.load(open('os/rootfs/usr/share/meridian/branding.json'));print(d['registry']['namespace']+'/'+d['registry']['image'])")"
+          for arch in x86_64 aarch64; do
+            bash ci/sign-image.sh "${image}:testing-${arch}"
+          done
+
+      # ADR-022's hard gate on the first :stable image. It runs here, right after
+      # signing, because the useful moment to learn that enforcement does not
+      # work is while the person who just approved the signature is still
+      # watching — not weeks later at a promote gate.
+      # ADR-022's hard gate on the first :stable image. It runs here, right after
+      # signing, because the useful moment to learn that enforcement does not
+      # work is while the person who just approved the signature is still
+      # watching — not weeks later at a promote gate.
+      #
+      # The script finds its own unsigned reference: PRs build and push pr-* tags
+      # but never reach this job, so one of those is an unsigned image inside our
+      # namespace — which is what proves the RULE, as opposed to an out-of-scope
+      # image, which only exercises the control.
+      - name: Negative test — unsigned images must be refused
+        run: bash ci/negative-test-signing.sh
