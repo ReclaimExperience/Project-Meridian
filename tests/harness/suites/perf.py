@@ -241,12 +241,20 @@ def measure(vm: VM, credentials: dict) -> dict:
         if name in found:
             forbidden_running[name] = found.strip()
 
+    # Composition, not just the total. Three structurally identical runs — same
+    # processes, userspace PSS within 1.7 MiB — produced idle-RAM figures 75.4 MiB
+    # apart, so the metric is moving on something that is not the desktop.
+    # `MemTotal - MemAvailable` counts whatever MemAvailable's heuristic declines
+    # to call reclaimable, and page cache grows as a session touches files.
+    # Recording the parts is the difference between diagnosing that and arguing
+    # about it.
     _status, meminfo = console.run(
-        "grep -E '^(MemTotal|MemAvailable|MemFree):' /proc/meminfo", timeout=60
+        "grep -E '^(MemTotal|MemAvailable|MemFree|Cached|Buffers|Slab|"
+        "SReclaimable|SUnreclaim|AnonPages|PageTables):' /proc/meminfo",
+        timeout=60,
     )
     fields = {
-        m.group(1): int(m.group(2))
-        for m in re.finditer(r"(MemTotal|MemAvailable|MemFree):\s+(\d+) kB", meminfo)
+        m.group(1): int(m.group(2)) for m in re.finditer(r"(\w+):\s+(\d+) kB", meminfo)
     }
     missing = {"MemTotal", "MemAvailable"} - fields.keys()
     if missing:
@@ -306,8 +314,24 @@ def measure(vm: VM, credentials: dict) -> dict:
         if len(parts) == 2 and parts[1].isdigit():
             slices[parts[0]] = round(int(parts[1]) / 1024 / 1024, 1)
 
+    composition = {
+        key.lower() + "_mib": round(fields[key] / 1024, 1)
+        for key in (
+            "MemFree",
+            "Cached",
+            "Buffers",
+            "Slab",
+            "SReclaimable",
+            "SUnreclaim",
+            "AnonPages",
+            "PageTables",
+        )
+        if key in fields
+    }
+
     return {
         "idle_ram_mib": round(used_mib, 1),
+        "memory_composition_mib": composition,
         "mem_total_mib": round(fields["MemTotal"] / 1024, 1),
         "boot_seconds": round(boot["total"], 2),
         "boot_breakdown": {k: round(v, 2) for k, v in boot.items() if k != "total"},
