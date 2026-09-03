@@ -169,6 +169,23 @@ def measure(vm: VM, credentials: dict) -> dict:
     print(f"perf: settling for {SETTLE_SECONDS}s before measuring idle RAM")
     time.sleep(SETTLE_SECONDS)
 
+    # What is drawing the desktop, recorded alongside the number it explains.
+    # The harness boots virtio-vga with no host GL passthrough, so the guest may
+    # be rendering in software (llvmpipe), which allocates per-thread tile
+    # buffers and costs hundreds of MiB that no machine with a working GPU driver
+    # pays. PRD 2 sets the budget "in a 4 GB VM", so if this says llvmpipe then
+    # part of what the gate measures is an artifact of how we measure it, and
+    # that belongs in the evidence rather than in someone's memory.
+    _status, renderer = console.run(
+        "journalctl -b --no-pager 2>/dev/null | "
+        "grep -aoiE 'llvmpipe|softpipe|virgl|swrast' | sort -u | head -5; "
+        "echo '--drm--'; ls /sys/class/drm/ 2>/dev/null | head -5",
+        timeout=90,
+    )
+    software_rendering = any(
+        word in renderer.lower() for word in ("llvmpipe", "softpipe", "swrast")
+    )
+
     forbidden_running = {}
     for name in FORBIDDEN_AT_IDLE:
         _status, found = console.run(f"pgrep -a {name} || true", timeout=30)
@@ -227,6 +244,8 @@ def measure(vm: VM, credentials: dict) -> dict:
         "settle_seconds": SETTLE_SECONDS,
         "systemd_analyze_raw": analyze.strip(),
         "forbidden_running": forbidden_running,
+        "renderer_probe": renderer.strip(),
+        "software_rendering": software_rendering,
         "top_processes_mib": top[:20],
         "cgroup_slices_mib": slices,
     }
@@ -248,6 +267,12 @@ def run(vm: VM, credentials: dict, only: str | None = None) -> None:
     }
     print(f"perf: boot breakdown {results['boot_breakdown']}")
     print(f"perf: RAM measured in a {results['mem_total_mib']:.0f} MiB VM")
+    if results.get("software_rendering"):
+        print(
+            "perf: NOTE — the guest is rendering in SOFTWARE. Some of the idle\n"
+            "perf:        RAM below is llvmpipe's tile buffers, which a machine\n"
+            "perf:        with a real GPU driver does not allocate."
+        )
     if results.get("cgroup_slices_mib"):
         print(f"perf: by slice {results['cgroup_slices_mib']}")
     for entry in results.get("top_processes_mib", [])[:12]:
