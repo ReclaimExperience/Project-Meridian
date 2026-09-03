@@ -30,6 +30,7 @@ from harness.suites.perf import (
     _duration_seconds,
     _parse_systemd_analyze,
     _verdict,
+    idle_ram_budget,
 )
 
 # Real shapes. systemd omits stages that did not happen (no firmware line on
@@ -98,15 +99,21 @@ def main() -> int:
         print("  ok    unparseable output yields no number (the suite then raises)")
 
     print("\nverdicts — a gate must fail above it and pass below it")
-    for key, unit in (("idle_ram_mib", " MiB"), ("boot_seconds", "s")):
-        gate, target = BUDGETS[key]["gate"], BUDGETS[key]["target"]
+    budgets_under_test = [("boot_seconds", "s", BUDGETS["boot_seconds"])]
+    for software in (True, False):
+        _gate, _target, _name = idle_ram_budget(software)
+        budgets_under_test.append(
+            (_name, " MiB", {"gate": _gate, "target": _target, "conditions": _name})
+        )
+    for key, unit, budget in budgets_under_test:
+        gate, target = budget["gate"], budget["target"]
         for measured, want_ok, label in (
             (target - 1, True, "under target"),
             (target + 1, True, "between target and gate"),
             (gate + 1, False, "over gate"),
             (gate, True, "exactly at the gate"),
         ):
-            ok, message = _verdict(key, measured, unit)
+            ok, message = _verdict(key, measured, unit, budget)
             if ok != want_ok:
                 print(f"  FAIL  {key} {label}: {measured} -> ok={ok}, wanted {want_ok}")
                 failures += 1
@@ -120,23 +127,81 @@ def main() -> int:
 
     # Budgets must match PRD 2. A gate that drifts from the document it
     # implements is worse than no gate: it looks authoritative.
-    prd = (ROOT / "docs" / "PRD.md").read_text()
-    for needle, why in (
-        ("≤ 1.1 GiB", "idle RAM gate"),
-        ("≤ 15 s", "boot time gate"),
-    ):
-        if needle not in prd:
-            print(f"  FAIL  PRD 2 no longer states {needle} for the {why};")
-            print("      tests/perf/budgets.json may now be enforcing a stale number.")
+    # --- ADR-017: the two names, and the offset's provenance ----------------
+    print("\nADR-017 — idle RAM has two names because it is two numbers")
+    idle = BUDGETS["idle_ram"]
+    product_gate = idle["product"]["gate_mib"]
+    offset = idle["render_offset"]
+    ci_gate, ci_target, ci_name = idle_ram_budget(software_rendering=True)
+    pr_gate, _pr_target, pr_name = idle_ram_budget(software_rendering=False)
+
+    for ok, why in [
+        (pr_name == "ram.idle.product", "a GPU-rendered run gates on ram.idle.product"),
+        (ci_name == "ram.idle.ci", "a software-rendered run gates on ram.idle.ci"),
+        (pr_gate == product_gate, "the product gate is the PRD 1.5 number"),
+        (
+            ci_gate == product_gate + offset["value_mib"],
+            "the CI gate is product + offset, computed",
+        ),
+        (
+            ci_target == idle["product"]["target_mib"] + offset["value_mib"],
+            "the CI target is offset the same way",
+        ),
+        (
+            pr_gate < ci_gate,
+            (
+                "the product gate is the stricter of the two, so a GPU run is "
+                "never judged by the tripwire"
+            ),
+        ),
+    ]:
+        print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
+        failures += 0 if ok else 1
+
+    # The CI gate must appear nowhere as a literal (ADR-017 clause 2): it is
+    # computed so that moving it means editing the offset's provenance record and
+    # saying what was re-measured. This test computes the string rather than
+    # spelling it, so the test file does not itself contain the number it forbids.
+    budgets_raw = (ROOT / "tests" / "perf" / "budgets.json").read_text()
+    for value, label in ((ci_gate, "CI gate"), (ci_target, "CI target")):
+        if str(value) in budgets_raw:
+            print(f"  FAIL  the {label} appears as a literal in budgets.json.")
+            print("      ADR-017 clause 2 requires it computed from product +")
+            print("      offset, so it cannot move without the provenance moving.")
             failures += 1
-    if BUDGETS["idle_ram_mib"]["gate"] != 1126 or BUDGETS["boot_seconds"]["gate"] != 15:
-        print("  FAIL  budgets.json does not match PRD 2 (1.1 GiB = 1126 MiB, 15 s).")
-        print(
-            "      Rule R-E: budgets are laws. Changing one needs an ADR, not an edit."
-        )
+        else:
+            print(f"  ok    the {label} is computed, not stored")
+
+    # An offset without provenance is a fudge factor: clause 3 lets it change
+    # only to a newly measured pair, which nobody can verify without this.
+    missing = [
+        k
+        for k in ("value_mib", "method", "build_id", "plasma", "mesa", "date")
+        if not offset.get(k)
+    ]
+    if missing:
+        print(f"  FAIL  render_offset is missing provenance: {missing}")
         failures += 1
     else:
-        print("  ok    budgets.json matches PRD 2")
+        print(f"  ok    render_offset carries full provenance ({offset['date']})")
+
+    prd = (ROOT / "docs" / "PRD.md").read_text()
+    for needle, why in (
+        ("ram.idle.product", "PRD 1.5 must name the product budget"),
+        ("ram.idle.ci", "PRD 1.5 must name the CI tripwire"),
+        ("≤ 15 s", "the boot time gate"),
+    ):
+        if needle not in prd:
+            print(f"  FAIL  {why}: {needle!r} is not in the PRD.")
+            failures += 1
+        else:
+            print(f"  ok    PRD states {needle!r}")
+    if product_gate != 1126 or BUDGETS["boot_seconds"]["gate"] != 15:
+        print("  FAIL  budgets.json does not match the PRD (1126 MiB, 15 s).")
+        print("      R-E: budgets are laws. Changing one needs an ADR, not an edit.")
+        failures += 1
+    else:
+        print("  ok    budgets.json matches the PRD")
 
     # run.py writes the per-run verdict as "<suite>-<arch>.json". A suite that
     # writes its own report under that same name is overwritten by the runner,

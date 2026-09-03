@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Start the on-screen keyboard only where there is a touchscreen (ADR-017 §5).
+#
+# Plasma 6.7 runs plasma-keyboard resident in every session. On a touchless
+# desktop that is 72 MiB PSS for a keyboard nobody can reach, which is bloat by
+# this project's own definition. On a 2-in-1 it is the only way to type a
+# password, which is why ADR-017 clause 4 forbids REMOVING it. Both facts are
+# true, so the answer is hardware-conditional rather than a global choice.
+#
+# FAILS SAFE, and the direction matters more than the saving. The two ways to be
+# wrong are not symmetric:
+#
+#   wrong on a touchless machine -> 72 MiB wasted, nobody notices
+#   wrong on a touch-only tablet -> the owner cannot type their password
+#
+# So this only ever DISABLES the keyboard when it has affirmatively established
+# there is no touchscreen. Any doubt — udevadm missing, the query failing, an
+# unreadable device database — leaves Plasma's default alone, keyboard on.
+#
+# Writes /etc/xdg/kwinrc, the system default. A user who turns the keyboard on
+# in Settings writes their own kwinrc, which wins; this never touches user
+# config, so it cannot overrule a person who asked for it.
+set -euo pipefail
+
+KWINRC=/etc/xdg/kwinrc
+
+log() { echo "meridian-osk-autoconfig: $*"; }
+
+touchscreen_present() {
+    # Exit 0 = touchscreen, 1 = definitely none, 2 = cannot tell.
+    command -v udevadm >/dev/null 2>&1 || return 2
+    local db
+    db="$(udevadm info --export-db 2>/dev/null)" || return 2
+    [[ -n "$db" ]] || return 2
+    if grep -q '^E: ID_INPUT_TOUCHSCREEN=1' <<< "$db"; then
+        return 0
+    fi
+    # A database that lists no input devices at all is not evidence of absence.
+    grep -q '^E: ID_INPUT=1' <<< "$db" || return 2
+    return 1
+}
+
+set +e
+touchscreen_present
+verdict=$?
+set -e
+
+# In-place editing without `sed -i`, which takes a backup suffix on BSD and not
+# on GNU. This script ships on Linux but is linted and tested on the macOS dev
+# loop (PRD 7.2), and a script that only works where it is not tested is how a
+# fix gets believed without being true.
+rewrite() {
+    local tmp
+    tmp="$(mktemp)"
+    awk "$1" "$KWINRC" > "$tmp" && mv "$tmp" "$KWINRC"
+}
+
+case "$verdict" in
+    0)
+        log "touchscreen present — leaving the on-screen keyboard enabled"
+        # Remove any disable we wrote before, so hardware changes (a 2-in-1
+        # docked, a panel replaced) take effect instead of sticking forever.
+        if [[ -f "$KWINRC" ]] && grep -q '^InputMethod=$' "$KWINRC"; then
+            rewrite '!/^InputMethod=$/'
+            log "removed the previous disable from ${KWINRC}"
+        fi
+        ;;
+    1)
+        log "no touchscreen — disabling the resident on-screen keyboard (ADR-017 §5)"
+        if [[ -f "$KWINRC" ]] && grep -q '^InputMethod=' "$KWINRC"; then
+            # Something already sets it. If a person turned the keyboard ON in
+            # Settings, that is a choice, and a memory optimisation does not get
+            # to undo it.
+            log "InputMethod is already set in ${KWINRC}; leaving it alone"
+        elif [[ ! -f "$KWINRC" ]]; then
+            printf '[Wayland]\nInputMethod=\n' > "$KWINRC"
+        elif grep -q '^\[Wayland\]' "$KWINRC"; then
+            rewrite '{ print } /^\[Wayland\]$/ { print "InputMethod=" }'
+        else
+            printf '\n[Wayland]\nInputMethod=\n' >> "$KWINRC"
+        fi
+        ;;
+    *)
+        log "could not determine whether a touchscreen exists — leaving Plasma's"
+        log "default alone. Erring towards a keyboard nobody needs, not a machine"
+        log "nobody can log in to."
+        ;;
+esac

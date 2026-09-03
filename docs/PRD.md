@@ -80,7 +80,8 @@ Meridian OS is built for exactly this person. Not for gamers (Bazzite exists), n
 | Unattended-install success on the reference hardware matrix | ≥ 95% of attempts | Section 10.2 matrix runs |
 | Zero-Terminal story pass rate | 22/22 stories | Section 10.1 in CI + manual |
 | "Parent test": non-technical human completes the 10-task script unaided | ≥ 9/10 tasks, ≥ 4/5 testers | Moderated sessions, M5 |
-| Idle RAM after login (2-min settle, 4 GB VM) | ≤ 1.1 GiB (target 950 MiB) | `tests/perf/idle_ram.sh` in CI |
+| **`ram.idle.product`** — idle RAM after login, GPU-rendered (2-min settle, 4 GB) | ≤ 1.1 GiB / 1126 MiB (target 950 MiB) | `tests/perf/idle_ram.sh` on the 10.2 low-end row (ADR-017) |
+| **`ram.idle.ci`** — the same, measured on the llvmpipe CI VM | `ram.idle.product` + `render_offset` (today: 1308 MiB, target 1132) | `tests/perf/idle_ram.sh` in CI — a **tripwire**, not a release claim (ADR-017) |
 | Cold boot, power-on → login screen (virtio SSD VM) | ≤ 15 s (target 10 s) | `tests/perf/boot_time.sh` in CI |
 | Login → usable desktop | ≤ 5 s | same harness |
 | ISO size | ≤ 3.5 GiB (target 3.0) | CI artifact check |
@@ -850,7 +851,8 @@ Phase 0 ≈ 11 sessions · Phase 1 ≈ 17 · Phase 2 ≈ 22 · Phase 3 ≈ 16 ·
 | Win10-refugee desktop | Dell OptiPlex 3050 / HP 2016–2017 i5, HDD+SSD | Pat's machine; BIOS+UEFI variants |
 | Win10-refugee laptop | ThinkPad T480 or similar 8th-gen | The canonical switcher laptop |
 | Modern mainstream laptop | 2022+ Ryzen or 12th-gen Intel, Wi-Fi 6 | Sam's class; s2idle + brightness + webcam |
-| Low-end constraint | 4 GB RAM Celeron/Pentium laptop, eMMC | Floor honesty (ADR-013) |
+| Low-end constraint | 4 GB RAM Celeron/Pentium laptop, eMMC | Floor honesty (ADR-013). **Canonical seat for `ram.idle.product` (ADR-017).** |
+| Touch-equipped laptop | Any 2-in-1 or touchscreen laptop | ADR-017 clause 5: the on-screen keyboard starts only when a touchscreen is present, so this is the only row that can prove it still appears when it should. A touchless machine cannot fail that check. |
 | Nvidia desktop | GTX 16xx AND RTX 30xx+ | ADR-012 both driver generations |
 | Trouble-hardware seat | One Broadcom-Wi-Fi Mac or similar | Driver-stack proof |
 | VMs | UTM/aarch64 (dev loop), QEMU-KVM x86_64 (CI), plus one VirtualBox+VMware smoke | Where users will "try it first" |

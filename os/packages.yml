@@ -168,6 +168,27 @@ protect:
                             # breaks the entire app set at once.
   - flatpak            # ADR-004: the store and every app in it.
 
+  # --- capabilities ADR-017 clause 4 forbids trading for RAM ----------------
+  #
+  # Both were the obvious answers when idle RAM came in over budget, and both
+  # take something real from a person to buy megabytes. They are in `protect:`
+  # rather than in a comment because a rule that lives only in prose is a rule
+  # that gets broken by the next agent measuring the same number.
+  #
+  # ADR-017 names the on-screen keyboard "maliit". Fedora 44 / Plasma 6.7 does
+  # not ship maliit — the OSK is plasma-keyboard, backed by qt6-qtvirtualkeyboard
+  # — and naming a package that is not installed protects NOTHING, which this
+  # repo already learned when `sddm` sat in this list after Fedora had replaced
+  # it with plasmalogin. So the installed names are used.
+  - plasma-keyboard    # The on-screen keyboard. 72 MiB PSS at idle, and the
+                       # single largest saving available — which is exactly why
+                       # it needs protecting. On a touch-only device it is the
+                       # only way to type a password.
+  - qt6-qtvirtualkeyboard  # What plasma-keyboard is built on; removing it takes
+                           # the OSK with it by the back door.
+  - xwaylandvideobridge  # Screen sharing from Wayland into X11 apps — Zoom and
+                         # Discord, both in WP-15's catalog. 29 MiB.
+
   # --- boot, update and rollback --------------------------------------------
   - systemd
   - bootc              # ADR-001. Losing this makes the image un-updatable, and

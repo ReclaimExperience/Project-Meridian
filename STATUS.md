@@ -708,7 +708,19 @@ Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
 
 **NOT done — WP-02 is not DONE until these land:**
 
-- **Idle RAM is over the gate, but by 116 MiB, not ~300.** Measured both ways on
+- **ADR-017 adopted (2026-09-03): the idle-RAM budget is GPU-measured; CI gates
+  via a calibrated offset.** This is the **second evidence-driven budget
+  amendment** — the ISO budget (2.8 → 3.5 GiB gate, for ADR-010's offline sideload
+  set) was the first. `ram.idle.product` = 1126 MiB (target 950), GPU-rendered on
+  the 10.2 low-end row, and the only number a release claim may cite.
+  `ram.idle.ci` = product + `render_offset` (182 MiB), the llvmpipe tripwire CI
+  can actually run — **computed, never stored**, so the CI gate cannot move
+  without editing the offset's provenance record. Recalibrate at every M-gate
+  from one paired measurement; >25% drift is a finding, not an update.
+  Removing the OSK or `xwaylandvideobridge` for RAM is forbidden, and both are now
+  in `protect:` rather than in prose. Commissioned separately: the OSK starts only
+  where a touchscreen exists.
+- **Original finding: over by 116 MiB, not ~300.** Measured both ways on
   the same image: **1242 MiB with a GPU** (`MERIDIAN_VM_GL=1`, virgl) vs ~1424 MiB
   mean with software rendering. The 182 MiB difference is llvmpipe's tile buffers,
   which no machine with a working GPU driver allocates — 155 MiB of it inside

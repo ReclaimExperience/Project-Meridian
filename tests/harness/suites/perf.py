@@ -100,8 +100,37 @@ def _duration_seconds(value: str) -> float:
     return seconds
 
 
-def _verdict(name: str, measured: float, unit: str) -> tuple[bool, str]:
-    budget = BUDGETS[name]
+def idle_ram_budget(software_rendering: bool) -> tuple[int, int, str]:
+    """The applicable idle-RAM gate and target, and which name they are.
+
+    ADR-017: idle RAM has two names because it is two numbers.
+
+      ram.idle.product  GPU-rendered. The PRD 1.5 metric, and the only one a
+                        release claim may cite.
+      ram.idle.ci       product + render_offset. The llvmpipe VM we can run per
+                        PR. A tripwire, not evidence.
+
+    The CI gate is COMPUTED here and stored nowhere, so moving it means editing
+    the offset's provenance record in budgets.json and saying what was
+    re-measured — which is the difference between a calibration and a fudge.
+
+    Choosing by what the run ACTUALLY rendered with, not by a flag, is the whole
+    point: comparing a software-rendered number against the product gate is the
+    error that made this look like a 300 MiB problem when it was 116.
+    """
+    idle = BUDGETS["idle_ram"]
+    gate = idle["product"]["gate_mib"]
+    target = idle["product"]["target_mib"]
+    if not software_rendering:
+        return gate, target, "ram.idle.product"
+    offset = idle["render_offset"]["value_mib"]
+    return gate + offset, target + offset, "ram.idle.ci"
+
+
+def _verdict(
+    name: str, measured: float, unit: str, budget: dict | None = None
+) -> tuple[bool, str]:
+    budget = budget or BUDGETS[name]
     gate, target = budget["gate"], budget["target"]
     if measured > gate:
         return False, (
@@ -285,9 +314,37 @@ def run(vm: VM, credentials: dict, only: str | None = None) -> None:
     """
     results = measure(vm, credentials)
 
+    ram_gate, ram_target, ram_name = idle_ram_budget(
+        bool(results.get("software_rendering"))
+    )
+    results["idle_ram_budget_name"] = ram_name
+    results["idle_ram_gate_mib"] = ram_gate
+    results["idle_ram_target_mib"] = ram_target
+    if ram_name == "ram.idle.ci":
+        offset = BUDGETS["idle_ram"]["render_offset"]
+        results["render_offset_mib"] = offset["value_mib"]
+        print(
+            f"perf: gating on {ram_name} = {ram_gate} MiB "
+            f"({BUDGETS['idle_ram']['product']['gate_mib']} product "
+            f"+ {offset['value_mib']} render offset, ADR-017)."
+        )
+        print("perf: this is the TRIPWIRE, not the product number. A green run here")
+        print("perf: does not support a claim about idle RAM on real hardware.")
+    else:
+        print(f"perf: gating on {ram_name} = {ram_gate} MiB (GPU-rendered, ADR-017)")
+
     checks = {
-        "idle_ram_mib": ("idle RAM", results["idle_ram_mib"], " MiB"),
-        "boot_seconds": ("boot time", results["boot_seconds"], "s"),
+        "idle_ram_mib": (
+            "idle RAM",
+            results["idle_ram_mib"],
+            " MiB",
+            {
+                "gate": ram_gate,
+                "target": ram_target,
+                "conditions": f"{ram_name}, ADR-017",
+            },
+        ),
+        "boot_seconds": ("boot time", results["boot_seconds"], "s", None),
     }
     print(f"perf: boot breakdown {results['boot_breakdown']}")
     print(f"perf: RAM measured in a {results['mem_total_mib']:.0f} MiB VM")
@@ -322,8 +379,8 @@ def run(vm: VM, credentials: dict, only: str | None = None) -> None:
     if not results.get("forbidden_running"):
         print(f"perf: none of {sorted(FORBIDDEN_AT_IDLE)} are running (as required)")
 
-    for key, (label, measured, unit) in checks.items():
-        ok, message = _verdict(key, measured, unit)
+    for key, (label, measured, unit, budget) in checks.items():
+        ok, message = _verdict(key, measured, unit, budget)
         print(f"perf: {label} {'ok' if ok else 'OVER GATE'} — {message}")
         results[f"{key}_within_gate"] = ok
         if not ok and (only is None or only == key):

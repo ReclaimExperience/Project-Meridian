@@ -3,20 +3,52 @@
     "PRD section 2's performance budgets. Rule R-E: budgets are laws — a gate is",
     "never edited to make a build pass. If a change cannot meet one, the change",
     "is wrong or the budget needs an ADR; both are decisions, not edits.",
-    "Gates are hard failures. Targets are what PRD 2 actually aims for: a run",
-    "between target and gate passes and says so, so drift is visible before it",
-    "becomes a breach."
+    "",
+    "IDLE RAM HAS TWO NAMES ON PURPOSE (ADR-017). They are different numbers and",
+    "conflating them is what produced a 300 MiB panic over a 116 MiB problem:",
+    "",
+    "  ram.idle.product = idle_ram.product.gate_mib",
+    "      The PRD 1.5 metric. GPU-rendered, on the 10.2 low-end row. This is the",
+    "      only number a release claim may cite.",
+    "",
+    "  ram.idle.ci      = idle_ram.product.gate_mib + idle_ram.render_offset.value_mib",
+    "      The per-PR tripwire, measured on the llvmpipe VM we can actually run in",
+    "      CI. COMPUTED from the two fields above, and deliberately never",
+    "      written down anywhere as a number of its own — so the CI gate cannot",
+    "      be moved without editing the offset's provenance record below and",
+    "      saying what was re-measured. A test enforces its absence.",
+    "",
+    "The offset is an empirical calibration constant, NOT a tunable. Per ADR-017",
+    "clause 3 it may only ever change to a newly measured pair — same build, both",
+    "renderers — taken at an M-gate, and drift over 25% is itself a finding to",
+    "investigate before the new value is adopted."
   ],
-  "idle_ram_mib": {
-    "gate": 1126,
-    "target": 950,
-    "conditions": "2-minute settle after GUI login, 4 GB VM (PRD 2)",
-    "note": "1.1 GiB = 1126 MiB. Measured as MemTotal - MemAvailable."
+  "idle_ram": {
+    "product": {
+      "gate_mib": 1126,
+      "target_mib": 950,
+      "conditions": "2-minute settle after GUI login, 4 GB, GPU-rendered (ADR-017 clause 1)",
+      "canonical_seat": "PRD 10.2 low-end row: 4 GB RAM, integrated GPU",
+      "interim_source": "the owner's GPU-accelerated local VM (MERIDIAN_VM_GL=1, virgl), until that machine exists",
+      "note": "1.1 GiB = 1126 MiB. Measured as MemTotal - MemAvailable."
+    },
+    "render_offset": {
+      "value_mib": 182,
+      "method": "paired measurement, same disk image, both renderers: llvmpipe mean 1424 MiB across 4 runs (1448.2 CI, 1414.0, 1436.6, 1397.5) minus virgl 1242.0 MiB",
+      "build_id": "31032e44b327eac8",
+      "image_version": "1.0.0-dev",
+      "plasma": "6.7.4-2.fc44",
+      "mesa": "26.1.4-4.fc44",
+      "kernel": "7.1.12-200.fc44",
+      "date": "2026-09-03",
+      "measured_by": "WP-02, issue #32",
+      "recalibrate": "at every M-gate (ADR-017 clause 3); >25% drift is a finding, not an update"
+    }
   },
   "boot_seconds": {
     "gate": 15,
     "target": 10,
     "conditions": "cold boot, power-on to login screen, virtio SSD VM (PRD 2)",
-    "note": "Read from systemd's own firmware+loader+kernel+userspace total."
+    "note": "Read from systemd's own firmware+loader+kernel+userspace total. Host-page-cache sensitive: the same image measured 16.9 s cold and 7.8 s warm, so a single over-gate reading on a busy host is not by itself a regression."
   }
 }
