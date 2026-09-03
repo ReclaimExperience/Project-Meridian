@@ -134,6 +134,10 @@ class VM:
     evidence: Path = field(default=None)  # type: ignore[assignment]
     _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
     _started_at: float | None = field(default=None, init=False, repr=False)
+    # Set in start(). Screenshots are impossible under GL (the framebuffer is a
+    # dmabuf, so QMP screendump answers "no surface"), and callers need to know
+    # rather than discovering it as a crash mid-suite.
+    gl: bool = field(default=False, init=False, repr=False)
     _qmp: QMP | None = field(default=None, init=False, repr=False)
     _console: Console | None = field(default=None, init=False, repr=False)
 
@@ -198,6 +202,7 @@ class VM:
         # Needs a readable /dev/dri/renderD128 on the host, so it is unavailable
         # on hosted CI runners.
         gl = os.environ.get("MERIDIAN_VM_GL") == "1"
+        self.gl = gl
         if gl and not Path("/dev/dri/renderD128").exists():
             raise VMError(
                 "MERIDIAN_VM_GL=1 but /dev/dri/renderD128 does not exist. Refusing "

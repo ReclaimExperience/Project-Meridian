@@ -177,9 +177,28 @@ def measure(vm: VM, credentials: dict) -> dict:
 
     # --- idle RAM ------------------------------------------------------------
     vm.qmp.wake_display()
-    # See smoke: typing a password at a black screen produces a timeout that
-    # blames whatever is waited on next.
-    wait_for_screen(vm, "the greeter", keep_as=f"perf-greeter-{vm.arch}")
+    if vm.gl:
+        # Under GL the framebuffer is a dmabuf and QMP screendump answers "no
+        # surface", so the picture-based check is unavailable — and ADR-017 makes
+        # the GPU-rendered number the PRODUCT metric, so "cannot screenshot"
+        # must not mean "cannot measure".
+        #
+        # Wait for the greeter's own session instead. This is weaker than seeing
+        # the screen, so it is backed up below: plasmashell appearing after the
+        # password is typed is itself proof the keystrokes landed. If they had
+        # gone nowhere, that wait fails and says so, rather than a number being
+        # reported from a VM that never logged in.
+        console.wait_until(
+            "loginctl list-sessions --no-legend 2>/dev/null || true",
+            lambda out: "plasmalogin" in out or "seat0" in out,
+            timeout=300,
+            description="a greeter session (GL: screenshots unavailable)",
+        )
+        print("perf: greeter session is up (no screenshot: GL framebuffer)")
+    else:
+        # See smoke: typing a password at a black screen produces a timeout that
+        # blames whatever is waited on next.
+        wait_for_screen(vm, "the greeter", keep_as=f"perf-greeter-{vm.arch}")
     _status, before = console.run("pgrep -a plasmashell || true", timeout=30)
     assert "plasmashell" not in before, (
         "plasmashell was running before the GUI login, so this measures a "
