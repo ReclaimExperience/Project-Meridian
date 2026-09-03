@@ -732,6 +732,18 @@ Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
   stored. A **relative ratchet** on summed userspace PSS (baseline 576, +25 MiB)
   is now the creep detector, because a gate slack enough not to be a coin flip is
   slack enough to hide steady growth.
+- **ADR-021 verified on a real CI-equivalent run: `EXIT=0`.** steady 917.1 (inside
+  the 963.2 CI target), shmem 45.4, **PSS 753.9 — −1.4 against the 755.3 baseline**
+  where it read +179.3 before. boot 8.1 s. The run that failed now passes for the
+  right reason.
+- **Caveat recorded for the M-gate re-pairing (ADR-020 §3 / ADR-021 §4): llvmpipe
+  is far less reproducible BETWEEN run-sets than GPU is.** Same image, two sets:
+  llvmpipe steady medians 948.1 vs 917.1 (**31.0 MiB apart**, within-set spreads
+  10.9 and 5.7); GPU medians 762.6 vs 759.9 (**2.7 MiB apart**). So the 188.2
+  offset carries roughly ±31 MiB of between-set uncertainty, and a re-pairing that
+  moves by that much is **not** evidence of a rendering-stack change. Not a problem
+  today — the CI gate has 71.1 MiB of headroom over the measured 917.1 — but a
+  future pair should be read with this in mind rather than as a precise constant.
 - **ADR-021 (2026-09-03): the PSS ratchet is CI-denominated.** ADR-018 §3 seeded
   it at 576, which was **GPU-measured**, while the ratchet runs on CI's llvmpipe —
   where a healthy build reads **755.3**, so it fired at **+179 on every PR**. Same
