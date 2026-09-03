@@ -42,7 +42,10 @@ ITEM = re.compile(r"^(?P<indent> *)- +(?P<value>.+)$")
 # the lint workflow; the build path (build.yml -> ci/build.sh -> podman build)
 # never validates it, so the structure has to be enforced here too.
 REQUIRED_TOP = ("version", "add", "remove")
-KNOWN = {(): {"version", "add", "remove", "systemd"}, ("systemd",): {"mask", "disable"}}
+KNOWN = {
+    (): {"version", "add", "remove", "protect", "systemd"},
+    ("systemd",): {"mask", "disable"},
+}
 
 
 def die(lineno, line, why):
@@ -232,17 +235,150 @@ MASK_RAW="$(parse_key systemd.mask)"
 to_items "$MASK_RAW";    MASK=("${ITEMS[@]+"${ITEMS[@]}"}")
 DISABLE_RAW="$(parse_key systemd.disable)"
 to_items "$DISABLE_RAW"; DISABLE=("${ITEMS[@]+"${ITEMS[@]}"}")
+PROTECT_RAW="$(parse_key protect)"
+to_items "$PROTECT_RAW"; PROTECT=("${ITEMS[@]+"${ITEMS[@]}"}")
+
+# Removing anything without declaring what must survive is the configuration
+# that deleted the desktop. Fail closed rather than removing unprotected.
+if [[ ${#REMOVE[@]} -gt 0 && ${#PROTECT[@]} -eq 0 ]]; then
+    echo "apply-packages: ${MANIFEST} removes packages but declares no 'protect:' list." >&2
+    echo "                dnf takes dependents with it, so a removal can delete the" >&2
+    echo "                desktop and still exit 0. Name what must survive." >&2
+    exit 2
+fi
 
 echo "apply-packages: add=${#ADD[@]} remove=${#REMOVE[@]} mask=${#MASK[@]} disable=${#DISABLE[@]}"
 
-if [[ ${#REMOVE[@]} -gt 0 ]]; then
-    echo "apply-packages: removing ${REMOVE[*]}"
-    dnf -y remove "${REMOVE[@]}"
-fi
-
+# INSTALL FIRST, THEN REMOVE. The other order looks natural and is wrong: the
+# install step drags removed packages back in as dependencies, and the build
+# still reports success. WP-02 hit this — plasma-welcome was removed and then
+# reinstalled as a weak dependency, so the OOBE wizard the removal existed to
+# delete was still in the image at the end.
+#
+# --setopt=install_weak_deps=False for the same reason and for pillar 4: a
+# Recommends is someone else's opinion about what a desktop should include, and
+# this product's whole claim is that it ships ~12 apps.
 if [[ ${#ADD[@]} -gt 0 ]]; then
     echo "apply-packages: installing ${ADD[*]}"
-    dnf -y install "${ADD[@]}"
+    dnf -y --setopt=install_weak_deps=False install "${ADD[@]}"
+fi
+
+if [[ ${#REMOVE[@]} -gt 0 ]]; then
+    echo "apply-packages: removing ${REMOVE[*]}"
+    # Snapshot first. `dnf remove` takes everything that DEPENDS on a package
+    # with it, so a one-line removal can silently delete the desktop: removing
+    # kmenuedit took plasma-desktop, plasma-workspace and sddm, and the build
+    # reported success. Verifying that the listed packages are gone does not
+    # catch that — it is the UNLISTED casualties that matter.
+    before_removal="$(mktemp)"
+    rpm -qa --qf '%{NAME}\n' | sort -u > "$before_removal"
+
+    # A protect entry for a package that is not installed protects NOTHING, and
+    # reads in review as though it does. "sddm" sat in this list while Fedora 44
+    # had already replaced it with plasma-login-manager: the login screen was
+    # unguarded and the list looked complete. Check before relying on it.
+    protect_missing=()
+    for candidate in "${PROTECT[@]}"; do
+        if ! grep -qx "$candidate" "$before_removal"; then
+            protect_missing+=("$candidate")
+        fi
+    done
+    if [[ ${#protect_missing[@]} -gt 0 ]]; then
+        echo >&2
+        echo "apply-packages: 'protect:' names packages that are not installed:" >&2
+        printf '    %s\n' "${protect_missing[@]}" >&2
+        echo "    Nothing can take them away, so they guard nothing while looking" >&2
+        echo "    like they do. Either the base renamed the package or the entry is" >&2
+        echo "    a typo. Fix the name; do not delete the entry." >&2
+        exit 1
+    fi
+
+    dnf -y remove "${REMOVE[@]}"
+
+    after_removal="$(mktemp)"
+    rpm -qa --qf '%{NAME}\n' | sort -u > "$after_removal"
+
+    departed="$(mktemp)"
+    comm -23 "$before_removal" "$after_removal" > "$departed"
+
+    # --- the check that matters: did the desktop survive? -------------------
+    #
+    # Removing kmenuedit took plasma-desktop, plasma-workspace and sddm with it
+    # — an image with no desktop and no login screen — and the build reported
+    # EXIT=0. Checking that the LISTED packages are gone does not catch that;
+    # they were. It is the unlisted casualties that decide whether the thing
+    # still boots to a usable system.
+    protected="$(mktemp)"
+    printf '%s\n' "${PROTECT[@]}" | sort -u > "$protected"
+    lost="$(comm -12 "$departed" "$protected")"
+
+    # Everything else that went. Companion subpackages are normal and expected
+    # — removing firefox should take firefox-langpacks — so this is reported
+    # for the record, not treated as a failure. It is build evidence: a reviewer
+    # can see exactly what a one-line manifest edit actually deleted.
+    wanted="$(mktemp)"
+    printf '%s\n' "${REMOVE[@]}" | sort -u > "$wanted"
+    collateral="$(comm -23 "$departed" "$wanted")"
+
+    # The opposite failure: a listed package that is still installed. dnf exits
+    # 0 having removed it and then reinstalled it to satisfy a Recommends —
+    # plasma-welcome survived two builds that way, so the OOBE wizard the
+    # removal existed to delete shipped anyway.
+    survived="$(comm -12 "$wanted" "$after_removal")"
+    rm -f "$before_removal" "$after_removal" "$departed" "$protected" "$wanted"
+
+    if [[ -n "$survived" ]]; then
+        echo >&2
+        echo "apply-packages: these were listed for removal and are STILL installed:" >&2
+        printf '%s\n' "$survived" | sed 's/^/    /' >&2
+        echo "    dnf exited 0, so something reinstalled them — usually a weak" >&2
+        echo "    dependency of a package in 'add:'." >&2
+        exit 1
+    fi
+
+    if [[ -n "$collateral" ]]; then
+        echo "apply-packages: also removed as dependents of the above:"
+        printf '%s\n' "$collateral" | sed 's/^/    /'
+    fi
+
+    if [[ -n "$lost" ]]; then
+        echo >&2
+        echo "apply-packages: a removal took PROTECTED packages with it:" >&2
+        printf '%s\n' "$lost" | sed 's/^/    /' >&2
+        echo >&2
+        echo "    These are named in the 'protect:' list of the manifest as" >&2
+        echo "    packages the image is not usable without. Something in" >&2
+        echo "    'remove:' is dependency-locked to them, and forcing it out" >&2
+        echo "    produces an image that builds cleanly and has no desktop." >&2
+        echo "    PRD WP-02: 'Escalate if a 3.2 removal is dependency-locked" >&2
+        echo "    into Plasma (document, propose substitute, wait).'" >&2
+        echo "    Mask or hide it instead (ADR-006 konsole precedent); do not" >&2
+        echo "    delete the protect entry to make this pass." >&2
+        exit 1
+    fi
+fi
+
+# Prove the removals actually stuck. dnf can report success while a package
+# returns as a dependency of something installed later, and a de-bloat that
+# silently leaves the software in place is worse than none: it makes a false
+# claim about what ships.
+still_present=()
+for package in "${REMOVE[@]+"${REMOVE[@]}"}"; do
+    if rpm -q "$package" >/dev/null 2>&1; then
+        still_present+=("$package")
+    fi
+done
+if [[ ${#still_present[@]} -gt 0 ]]; then
+    echo "apply-packages: these were listed for removal but are STILL INSTALLED:" >&2
+    for package in "${still_present[@]}"; do
+        echo "    ${package}  <- required by: $(rpm -q --whatrequires "$package" 2>/dev/null | tr '\n' ' ' || echo 'nothing (weak dependency?)')" >&2
+    done
+    echo >&2
+    echo "    A removal that does not remove is a false claim about what ships." >&2
+    echo "    If the package is dependency-locked into Plasma, PRD WP-02 says to" >&2
+    echo "    escalate and hide it rather than force it out (ADR-006's pattern for" >&2
+    echo "    konsole: hidden is not the same as removed)." >&2
+    exit 1
 fi
 
 for unit in "${MASK[@]+"${MASK[@]}"}"; do

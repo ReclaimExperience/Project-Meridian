@@ -7,23 +7,204 @@
 #
 # Removals are CODEOWNERS-gated (rule R-H): taking a package out can silently
 # break a driver or codec path that only shows up on someone's real hardware.
+# Every removal below therefore cites the ADR or PRD section that requires it.
 #
-# WP-01 ships this file empty on purpose. WP-02 (de-bloat & package curation)
-# populates it against the PRD 3.2 manifest.
+# ADR-002 warning: never remove anything ublue's driver/codec stack provides,
+# even when it looks unused in a VM. It is not unused on Pat's 2017 HP.
 
 version: 1
 
 # Packages layered on top of the base image.
-add: []
+#
+# PRD 3.2 names the visible app set; these are the members the base does not
+# already carry. Everything else a user wants is one click away in the store
+# (ADR-004) — this list is deliberately hard to grow.
+add:
+  # --- the visible apps PRD 3.2 requires but the base lacks ----------------
+  - gwenview          # Photos. Pat's phone photos have to open in something.
+  - okular            # PDF. Boarding passes, bank statements, the school letter.
+  - haruna            # Media. The video a nephew sends, playing without a codec hunt.
+  - kcalc             # Calculator. Windows parity; nobody installs a calculator.
+  - plasma-print-manager  # Printers page in Settings (PRD 5.6); WP-22 configures
+                          # it. PRD 3.2 calls this "print-manager", which is the
+                          # upstream name; Fedora ships it as plasma-print-manager
+                          # and `dnf install print-manager` fails outright.
+
+  # --- the fonts a Windows document arrives in (PRD 4.1, 6.2) --------------
+  #
+  # Metric-compatible substitutes, not lookalikes: each has the same character
+  # widths as the Microsoft font it stands in for, so a .docx Pat brings from the
+  # old machine keeps its line and page breaks. Without them every inherited
+  # document reflows on first open, which reads as "Linux broke my files" — the
+  # single most persona-damaging first impression available.
+  - liberation-sans-fonts   # Arial
+  - liberation-serif-fonts  # Times New Roman
+  - liberation-mono-fonts   # Courier New
+  - google-carlito-fonts    # Calibri — the default in every Office since 2007,
+                            # so this is the one that matters most.
+  - google-crosextra-caladea-fonts  # Cambria
+  # Fedora splits Liberation into three; there is no `liberation-fonts` to
+  # install. Noto (incl. CJK and emoji) is already in the base.
+  # Schibsted Grotesk, PRD 4.1's brand face, is not packaged in Fedora at all
+  # and has to be bundled — that belongs to WP-05's branding work, not here.
+  - rsms-inter-fonts        # Inter, PRD 4.1's UI face.
+
+  # --- update machinery (ADR-008); WP-04 configures it ---------------------
+  - greenboot                    # boot health checks -> automatic rollback
+  - greenboot-default-health-checks
 
 # Packages removed from the base image.
 #
-# ADR-002 warning for WP-02: never remove anything ublue's driver/codec stack
-# provides, even when it looks unused in a VM. It is not unused on Pat's 2017 HP.
-remove: []
+# Two kinds: things an ADR forbids, and things PRD 3.2 leaves out. Both are
+# listed with the authority, because "it looked like clutter" is not a reason to
+# remove software from someone's computer.
+remove:
+  # --- forbidden by an ADR -------------------------------------------------
+  - firefox            # ADR-004/ADR-010: the browser is a Flatpak, carried on the
+                       # ISO sideload set. An RPM Firefox would shadow it and
+                       # update on a different schedule than every other app.
+  - plasma-discover    # ADR-004: "Discover's PackageKit backend is not shipped".
+                       # WP-13's store replaces it.
+  - openssh-server     # ADR-015: "no SSH daemon". Found by the WP-03 harness:
+                       # installed but disabled, which is one `systemctl enable`
+                       # from listening. Section 12 claims the browser is the only
+                       # routine network-facing app; that is untrue while this ships.
+  - krfb               # Desktop sharing = a VNC server. Same ADR-015 rule, and a
+                       # far worse default than sshd on an untrusted network.
+  - plasma-drkonqi     # ADR-011: no crash reporting of any kind. A crash dialogue
+                       # offering to send a backtrace is exactly what pillar 5 says
+                       # this system does not do.
 
-# Systemd units masked or disabled in the image. Baloo lands here (ADR-016),
-# along with anything the WP-02 audit finds phoning home (ADR-011).
+  # PackageKit-Qt6 is NOT here. It looks like an ADR-004 violation and is not
+  # one: the PackageKit DAEMON is absent from the base — no packagekitd, no
+  # packagekit.service, no D-Bus activation file — so what remains is a client
+  # library with nothing to talk to. ADR-004 asks that the backend not be
+  # shipped, and it is not. Removing the library anyway takes plasma-desktop,
+  # plasma-workspace and dolphin with it (86 packages); the build guard caught
+  # that. Note that `rpm -q --whatrequires PackageKit-Qt6` reports "no package
+  # requires" it, because Plasma depends on the SONAME rather than the name —
+  # a name-only check is not evidence that a removal is safe.
+  - akonadi-server     # PRD 6.2 names the Akonadi/PIM stack. There is no mail,
+                       # calendar or contacts app in 3.2, so this is a MySQL
+                       # instance running for nothing — and idle RAM is a 1.1 GiB
+                       # gate, not a preference.
+  - ublue-os-just      # PRD 6.2's "ublue-branded extras". A library of `just`
+                       # recipes is a terminal surface, and INV-0 says nobody has
+                       # to open one. NOT touching ublue-os-akmods-addons,
+                       # -udev-rules or -signing: ADR-002 is explicit that the
+                       # driver stack stays, and it is why Pat's 2017 HP works.
+                       # ublue-os-update-services is also left alone deliberately
+                       # — it overrides rpm-ostreed and flatpak update timers, so
+                       # it collides with ADR-008, and WP-04 owns that decision.
+
+  # --- PRD 3.2 leaves these out --------------------------------------------
+  - plasma-welcome     # Named in 3.2's removal list. Also half of the double-OOBE
+                       # the WP-03 harness found: Plasma's own wizard runs before
+                       # ours (PRD 5.8) unless both of these go.
+  - plasma-setup       # The other half. plasma-setup.service runs
+                       # Before=display-manager.service and preempts SDDM entirely.
+  - kde-connect        # PRD 15: KDE Connect is v2, not 1.0.
+  - kate               # 3.2 names KWrite. Kate is the same job with an IDE's
+                       # surface area; two text editors is one too many for pillar 4.
+  - kde-partitionmanager  # Not in 3.2. A one-click disk editor in the launcher of a
+                          # machine whose owner fears "breaking it" is a hazard, not
+                          # a feature. Installer partitioning is WP-17's, gated.
+  - kwalletmanager5    # Not in 3.2. Wallet management surfaces a concept the
+                       # persona has no model for.
+  - kinfocenter        # Not in 3.2. Settings -> About covers what Pat needs.
+  - khelpcenter        # Not in 3.2. Our help is docs/help (WP-25), written for
+                       # this product rather than for KDE in general.
+  # kmenuedit is NOT here: it is a hard dependency of plasma-desktop, and
+  # removing it takes plasma-desktop, plasma-workspace and sddm with it — an
+  # image with no desktop and no login screen, built successfully. PRD WP-02
+  # says to escalate a dependency-locked removal rather than force it, so it is
+  # escalated (DECISION-NEEDED) and stays installed for now. ADR-006's konsole
+  # precedent — hidden is not the same as removed — is the likely substitute,
+  # and hiding belongs to WP-07's KIOSK work.
+  - kfind              # Not in 3.2. Search is the Start menu (ADR-016).
+  - kcharselect        # Not in 3.2. Meta+. is the emoji picker (Appendix D).
+  - kdebugsettings     # Not in 3.2. A developer tool in a consumer launcher.
+  - kjournald          # Not in 3.2. Log browsing is Advanced-mode territory.
+  - filelight          # Not in 3.2. Disk usage lives in Settings -> About.
+  - firewall-config    # Not in 3.2. ADR-015 makes security invisible; a firewall
+                       # editor invites exactly the tinkering it forbids.
+  - nvtop              # Not in 3.2. A GPU monitor for a persona who does not know
+                       # what a GPU is.
+  - htop               # Not in 3.2. plasma-systemmonitor is the visible one, and
+                       # htop needs the terminal that INV-0 says nobody must open.
+
+# Packages the image is not usable without.
+#
+# This list is not about what to install — it is a tripwire. `dnf remove` takes
+# everything that DEPENDS on a package with it, so one line in `remove:` above
+# can delete the desktop while the build reports success. That happened: taking
+# out kmenuedit removed plasma-desktop, plasma-workspace and sddm, and the only
+# signal was EXIT=0 and a suspiciously short launcher.
+#
+# apply-packages.sh fails the build if a removal takes any of these. When it
+# fires, the answer is to stop removing that package — mask or hide it instead
+# (ADR-006's konsole precedent: hidden is not removed) — and NOT to delete the
+# entry from this list to get a green build.
+protect:
+  # --- the desktop and the way in -------------------------------------------
+  - plasma-desktop     # Without this there is no Plasma session at all.
+  - plasma-workspace
+  - kwin               # The compositor. No kwin, no windows.
+  - plasma-login-manager  # The login screen. Fedora 44 / Plasma 6.7 replaced
+                          # SDDM with plasmalogin, and `sddm` is not installed at
+                          # all — display-manager.service is an alias for
+                          # plasmalogin.service. "sddm" here protected nothing
+                          # while reading as protection. No login screen means no
+                          # way in, on a machine with no terminal by design
+                          # (INV-0).
+
+  # --- the things Pat's first hour depends on -------------------------------
+  - NetworkManager     # Wi-Fi. ADR-002's whole point is that hardware works.
+  - plasma-nm          # ...and the applet to choose a network without a terminal.
+  - pipewire           # Sound. A silent machine reads as a broken one.
+  - wireplumber
+  - xdg-desktop-portal-kde  # File pickers and permissions for Flatpak apps;
+                            # ADR-004 makes every app a Flatpak, so losing this
+                            # breaks the entire app set at once.
+  - flatpak            # ADR-004: the store and every app in it.
+
+  # --- capabilities ADR-017 clause 4 forbids trading for RAM ----------------
+  #
+  # Both were the obvious answers when idle RAM came in over budget, and both
+  # take something real from a person to buy megabytes. They are in `protect:`
+  # rather than in a comment because a rule that lives only in prose is a rule
+  # that gets broken by the next agent measuring the same number.
+  #
+  # ADR-017 names the on-screen keyboard "maliit". Fedora 44 / Plasma 6.7 does
+  # not ship maliit — the OSK is plasma-keyboard, backed by qt6-qtvirtualkeyboard
+  # — and naming a package that is not installed protects NOTHING, which this
+  # repo already learned when `sddm` sat in this list after Fedora had replaced
+  # it with plasmalogin. So the installed names are used.
+  - plasma-keyboard    # The on-screen keyboard. 72 MiB PSS at idle, and the
+                       # single largest saving available — which is exactly why
+                       # it needs protecting. On a touch-only device it is the
+                       # only way to type a password.
+  - qt6-qtvirtualkeyboard  # What plasma-keyboard is built on; removing it takes
+                           # the OSK with it by the back door.
+  - xwaylandvideobridge  # Screen sharing from Wayland into X11 apps — Zoom and
+                         # Discord, both in WP-15's catalog. 29 MiB.
+
+  # --- boot, update and rollback --------------------------------------------
+  - systemd
+  - bootc              # ADR-001. Losing this makes the image un-updatable, and
+                       # the failure appears weeks later on someone's machine.
+  - ostree
+  - dracut             # No initramfs, no boot.
+  - greenboot          # ADR-008's automatic rollback; added in `add:` above.
+  - plasma-systemmonitor  # PRD 3.2's visible app, and the only way to see a
+                          # runaway process without the terminal INV-0 forbids.
+
+# Systemd units masked or disabled in the image.
 systemd:
-  mask: []
+  mask:
+    # ADR-016: "Baloo is disabled and masked". Masked rather than removed —
+    # kf6-baloo is a Plasma dependency, so removing it is dependency-locked.
+    # This is the sanctioned alternative the WP names ("or masked if dep-locked
+    # — record which"): recorded here.
+    - baloo_file.service
   disable: []

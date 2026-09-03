@@ -78,9 +78,12 @@ Meridian OS is built for exactly this person. Not for gamers (Bazzite exists), n
 | Metric | Gate | Measured by |
 |---|---|---|
 | Unattended-install success on the reference hardware matrix | ≥ 95% of attempts | Section 10.2 matrix runs |
-| Zero-Terminal story pass rate | 22/22 stories | Section 10.1 in CI + manual |
+| Zero-Terminal story pass rate | 23/23 stories | Section 10.1 in CI + manual |
 | "Parent test": non-technical human completes the 10-task script unaided | ≥ 9/10 tasks, ≥ 4/5 testers | Moderated sessions, M5 |
-| Idle RAM after login (2-min settle, 4 GB VM) | ≤ 1.1 GiB (target 950 MiB) | `tests/perf/idle_ram.sh` in CI |
+| **`steady`** — AnonPages + SUnreclaim + KernelStack + PageTables, GPU-rendered, **median of 3 full boots** (2-min settle each) | ≤ 800 MiB (target 775) | `tests/perf/idle_ram.sh` on the 10.2 low-end row (ADR-020 §1a). Process and kernel memory: stable to ~9 MiB, so the gate means something |
+| **`shmem` ceiling** — shared memory, sampled as the **minimum over a 60 s post-settle window** | ≤ 250 MiB | A tripwire against a buffer-pool regression, not a budget (ADR-020 §1b). Loose on purpose: twice the largest figure ever observed |
+| **Userspace PSS ratchet** — summed userspace PSS, **CI/llvmpipe-denominated** (ADR-021) | ≤ +25 MiB over the rolling median of the last 10 main-branch nightlies (interim seed 755.3 until 10 exist), unless acknowledged in the PR with a reason | The **creep detector** (ADR-018 §3). Measured **directly** in CI's own denomination — no offset, unlike `steady` — because its canonical value *is* the CI history. GPU PSS is informational and never cross-compared |
+| *(informational, gates nothing)* `MemTotal − MemAvailable` and total committed | — | Recorded per run. Kept because `MemTotal − MemAvailable` is what `free` prints, so it is the number a user quotes back to us even though it is not the number in the gate |
 | Cold boot, power-on → login screen (virtio SSD VM) | ≤ 15 s (target 10 s) | `tests/perf/boot_time.sh` in CI |
 | Login → usable desktop | ≤ 5 s | same harness |
 | ISO size | ≤ 3.5 GiB (target 3.0) | CI artifact check |
@@ -509,6 +512,8 @@ Phase 0 · Depends: WP-01 · Parallel-safe: WP-03, 04 · Risk: low · Size: M ·
 **Objective:** The image contains exactly the 3.2 manifest — nothing else that draws pixels or burns RAM.
 **Deliverables:** `os/packages.yml` populated: remove (Discover + PackageKit stack, Akonadi/PIM, Baloo (or masked if dep-locked — record which), KDE games/extras, plasma-welcome, konversation/kmail-anything, ublue-branded extras `[list at execution from rpm -qa diff]`); add (haruna, print-manager, sane-airscan backends, fonts per 4.1/3.2, toolbox/distrobox, tuned-ppd, thermald, greenboot); systemd preset file disabling/masking: baloo, kwallet-pam prompts for our flow, anything phoning home found by audit; `tests/perf/idle_ram.sh` + `boot_time.sh` (first real perf tests, callable standalone pre-WP-03).
 **Steps:** boot base → inventory (`rpm -qa`, `systemctl list-units`, `flatpak list`) committed to `docs/inventory-before.txt` → iterate removals in packages.yml (bootc build cycle) → verify nothing user-visible broke (apps menu audit vs 3.2 list) → record after-inventory + RAM delta.
+**Commissioned investigation (ADR-018 §5, S-size, knowledge only, gates nothing):** Xwayland on-demand feasibility `[VERIFY kwin support]`; a kded module audit; KRunner preload. This is the legitimate path toward the 1100 target — the 950 aspiration is contingent on what it finds, and "it found nothing" is an acceptable result to be written down rather than quietly dropped.
+
 **Acceptance:** idle RAM ≤ 1.1 GiB gate passes on x86_64 KVM 4 GB VM (report number in STATUS.md; target 950 MiB — if > gate, escalate, don't hide); app launcher shows only 3.2's visible set (screenshot); `systemctl --failed` empty; no `.desktop` entries from removed stacks; `docs/inventory-after.txt` committed.
 **Forbidden:** removing anything ADR-002's driver stack provides (drivers/codecs stay even if "unused" in VM); removing konsole (hidden ≠ removed, ADR-006).
 **Escalate if:** a 3.2 removal is dependency-locked into Plasma (document, propose substitute, wait).
@@ -614,8 +619,8 @@ Phase 2 · Depends: WP-09 (devices row), WP-10 (sidebar) · Parallel-safe: WP-12
 #### WP-12 — Settings curation + custom KCMs
 Phase 2 · Depends: WP-05, 07; WP-04 (updates data) · Parallel-safe: WP-10, 11, 13 · Risk: medium · Size: L · ADRs: 006, 008, 011; §5.6
 **Objective:** Settings a switcher can read: 13 pages, 4 of them ours.
-**Deliverables:** systemsettings sidebar allowlist per 5.6 (KIOSK-hide all else; keep hidden KCM binaries — Advanced may re-expose later versions); ordering + icon tiles per mockup (custom sidebar styling within systemsettings theming limits — screenshot gate decides adequacy); custom KCMs in `apps/settings-kcms/`: **Updates** (bootc is daemonless with no D-Bus API — WP-04's update service therefore publishes `bootc status --json` output plus rollback markers to `/run/meridian/update-status.json`, world-readable, refreshed by the timer and on boot; this KCM reads that file plus flatpak history + fwupd offers; headline states; history list; apply-at-shutdown indicator; failure surface for WP-04 rollback marker: "Last update was undone automatically — you're on the previous version. We'd love the report." → About's report tool), **Apps** (Flatpak list w/ uninstall+portal permissions in plain language; Windows-apps section built against the `org.meridian.WinApps` contract fixture (8.0); defaults picker per 5.6), **Advanced** (polkit action `org.meridian.settings.advanced` auth_admin; toggles per 5.6 writing `/etc/meridian/advanced.conf` + applying live: places/terminal/dev-mode/captive-portal; "Reset Meridian defaults" = wipe user-level overrides of our config domains w/ confirm), **About** (branding.json-driven; device rename; report-a-problem zip: journal tail, hw inventory, versions — saved to Documents, path shown, nothing uploaded (ADR-011)); Appearance page: confirm stock KCM covers 5.6 needs (wallpaper/accent/light-dark) + add **Familiar mode** toggle (flips WP-07's scheme pair + Dolphin click mode live) — extend via our KCM if stock can't host the toggle sanely.
-**Acceptance:** stories ZT-10 (change wallpaper+accent, survives reboot), ZT-11 (Updates page states: up-to-date / staged / rolled-back — harness drives all three via WP-04 hooks), ZT-12 (Advanced auth → system files visible in Files → toggle back), ZT-13 (add second user from Users page, log into it — profile gets full Meridian defaults: this test guards our skel/defaults architecture); sidebar shows exactly the 13 (screenshot + scripted KCM enumeration); jargon lint on all our KCM strings; every page keyboard-navigable.
+**Deliverables:** systemsettings sidebar allowlist per 5.6 (KIOSK-hide all else; keep hidden KCM binaries — Advanced may re-expose later versions); ordering + icon tiles per mockup (custom sidebar styling within systemsettings theming limits — screenshot gate decides adequacy); custom KCMs in `apps/settings-kcms/`: **Updates** (bootc is daemonless with no D-Bus API — WP-04's update service therefore publishes `bootc status --json` output plus rollback markers to `/run/meridian/update-status.json`, world-readable, refreshed by the timer and on boot; this KCM reads that file plus flatpak history + fwupd offers; headline states; history list; apply-at-shutdown indicator; failure surface for WP-04 rollback marker: "Last update was undone automatically — you're on the previous version. We'd love the report." → About's report tool), **Apps** (Flatpak list w/ uninstall+portal permissions in plain language; Windows-apps section built against the `org.meridian.WinApps` contract fixture (8.0); defaults picker per 5.6), **Advanced** (polkit action `org.meridian.settings.advanced` auth_admin; toggles per 5.6 writing `/etc/meridian/advanced.conf` + applying live: places/terminal/dev-mode/captive-portal; "Reset Meridian defaults" = wipe user-level overrides of our config domains w/ confirm), **About** (branding.json-driven; device rename; report-a-problem zip: journal tail, hw inventory, versions — saved to Documents, path shown, nothing uploaded (ADR-011)); Appearance page: **On-screen keyboard: Automatic / Always / Off** (ADR-018 §6, ADR-019 §7) — pointer-reachable, NOT behind the Advanced auth gate, writing the mode WP-02's session service reads. Automatic is the default and needs no UI to work, which is why ADR-018 §6 is MET for `:testing` without this row; `:stable` for the feature waits on it. The config file the service reads is an implementation detail and **is never documented as a user path**; confirm stock KCM covers 5.6 needs (wallpaper/accent/light-dark) + add **Familiar mode** toggle (flips WP-07's scheme pair + Dolphin click mode live) — extend via our KCM if stock can't host the toggle sanely.
+**Acceptance:** story **ZT-23** (on-screen keyboard: on a touch seat it appears automatically; Appearance → Off hides it and survives reboot; → Always shows it on a touchless machine — the INV-0 requirement is that all three are reachable with a pointer alone, since a user who needs the on-screen keyboard cannot type to find it); stories ZT-10 (change wallpaper+accent, survives reboot), ZT-11 (Updates page states: up-to-date / staged / rolled-back — harness drives all three via WP-04 hooks), ZT-12 (Advanced auth → system files visible in Files → toggle back), ZT-13 (add second user from Users page, log into it — profile gets full Meridian defaults: this test guards our skel/defaults architecture); sidebar shows exactly the 13 (screenshot + scripted KCM enumeration); jargon lint on all our KCM strings; every page keyboard-navigable.
 **Forbidden:** forking systemsettings shell; any setting that writes outside user config + `/etc/meridian/`; telemetry-ish "diagnostics upload" convenience.
 **Escalate if:** stock Appearance KCM can't be trimmed to spec (then our replacement page — small, but owner should know scope grew).
 
@@ -798,7 +803,7 @@ Phase 0 ≈ 11 sessions · Phase 1 ≈ 17 · Phase 2 ≈ 22 · Phase 3 ≈ 16 ·
 ### 9.3 The 1.0 release checklist (every line checked, evidence-linked, signed)
 
 1. All 27 WPs DONE in STATUS.md (or owner-waived in writing with v1.1 issue links).
-2. Zero-Terminal suite 22/22 on x86_64 stable ISO→install→use path.
+2. Zero-Terminal suite 23/23 on x86_64 stable ISO→install→use path.
 3. All Section 1.5 metric gates green, numbers recorded.
 4. Hardware matrix mandatory rows all green (10.2), zero open P1s, P2s triaged with owners.
 5. Rollback drill + update-landing drill on beta cohort confirmed.
@@ -840,8 +845,9 @@ Phase 0 ≈ 11 sessions · Phase 1 ≈ 17 · Phase 2 ≈ 22 · Phase 3 ≈ 16 ·
 | ZT-20 | Find "what replaces Excel" in the store guide and install it | 13/15 |
 | ZT-21 | Bring Documents and Pictures over from a Windows disk | 21 |
 | ZT-22 | Add a discovered printer and print a test page | 22 |
+| ZT-23 | Turn the on-screen keyboard on or off without a keyboard | 12 |
 
-(The gate is ALL 22 stories green; any story added later joins the gate automatically.)
+(The gate is ALL 23 stories green; any story added later joins the gate automatically.)
 
 ### 10.2 Hardware matrix (mandatory rows for 1.0; template in `docs/qa/`)
 
@@ -850,7 +856,8 @@ Phase 0 ≈ 11 sessions · Phase 1 ≈ 17 · Phase 2 ≈ 22 · Phase 3 ≈ 16 ·
 | Win10-refugee desktop | Dell OptiPlex 3050 / HP 2016–2017 i5, HDD+SSD | Pat's machine; BIOS+UEFI variants |
 | Win10-refugee laptop | ThinkPad T480 or similar 8th-gen | The canonical switcher laptop |
 | Modern mainstream laptop | 2022+ Ryzen or 12th-gen Intel, Wi-Fi 6 | Sam's class; s2idle + brightness + webcam |
-| Low-end constraint | 4 GB RAM Celeron/Pentium laptop, eMMC | Floor honesty (ADR-013) |
+| Low-end constraint | 4 GB RAM Celeron/Pentium laptop, eMMC | Floor honesty (ADR-013). **Canonical seat for `ram.idle.product` (ADR-017).** |
+| Touch-equipped laptop **(mandatory)** | Any 2-in-1 or touchscreen laptop | ADR-018 §6: the on-screen keyboard is automatic on touch hardware, and this is the only row that can prove it still appears when it should — a touchless machine cannot fail that check. The reworked trim ships to `:testing` on structural greeter safety (nothing writes to `/etc`, the greeter reads none of it); **verification on this seat gates `:stable` for the feature.** |
 | Nvidia desktop | GTX 16xx AND RTX 30xx+ | ADR-012 both driver generations |
 | Trouble-hardware seat | One Broadcom-Wi-Fi Mac or similar | Driver-stack proof |
 | VMs | UTM/aarch64 (dev loop), QEMU-KVM x86_64 (CI), plus one VirtualBox+VMware smoke | Where users will "try it first" |

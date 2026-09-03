@@ -1,0 +1,17 @@
+[Unit]
+Description=On-screen keyboard: automatic on touch hardware (ADR-018)
+# A USER unit, in the session's own scope. The greeter runs its own compositor
+# as a different user and never sees this — which is the entire point of the
+# rework: the login screen must not be in the blast radius of a memory trim.
+Before=plasma-kwin_wayland.service
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/meridian/osk-session-config
+# The session must start even if this does not.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=plasma-workspace.target

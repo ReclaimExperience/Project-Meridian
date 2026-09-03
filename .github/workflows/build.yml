@@ -66,6 +66,19 @@ jobs:
       # Fork PRs get no GHCR credentials, so they build without pushing. ADR-014
       # makes this repo public, so fork PRs are a real path, not a hypothetical —
       # they must not fail on a push they were never able to perform.
+      # Built ROOTLESS, deliberately, after an experiment that failed.
+      #
+      # Building as root would let ci/vm-test.sh skip an 8.7 GiB `podman save |
+      # sudo podman load` — 4m12s of a 25-minute job spent moving bytes that were
+      # already on the disk. That is a real saving and it is not worth it:
+      # rootful builds cost two credential failures (the login moved with the
+      # build, and the rootless credential check could no longer pull), and then
+      # hung for 1h45m at the first RUN step on the x86_64 runner where the
+      # rootless build takes under four minutes.
+      #
+      # Four minutes saved is not worth a build that does not finish. If this is
+      # attempted again, the thing to work out first is why a rootful `RUN` step
+      # stalls on a hosted runner whose root store is a bind mount onto /mnt.
       - name: Build and push
         env:
           CAN_PUSH: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
@@ -79,22 +92,6 @@ jobs:
             bash ci/build.sh ${{ matrix.arch }}
           fi
 
-      # PRD 7.3's vm-test row. Only `smoke` gates a PR:
-      #   - `screens` needs x86_64 baselines, which must be created deliberately
-      #     in their own commit (rule R-F) and do not exist yet;
-      #   - `security` currently fails on two real ADR-015 defects that WP-02
-      #     owns (LLMNR on 5355, and sshd shipping), so gating on it here would
-      #     block every PR on someone else's work;
-      #   - `privacy` takes a 10-minute idle window by design.
-      # Those three run nightly instead. Widening this list is how a suite stops
-      # being advisory.
-      - name: Harness suites
-        if: matrix.arch == 'x86_64'
-        run: |
-          sudo apt-get install -y -qq qemu-system-x86 ovmf
-          python3 -m pip install --quiet --break-system-packages pillow numpy
-          bash ci/vm-test.sh x86_64 smoke
-
       # WP-03 acceptance: the harness logs in as `mtest`, so prove that account
       # is absent from the image that was actually PUSHED — not from a local
       # build of it.
@@ -103,6 +100,11 @@ jobs:
       # check that pushed an image without a single assertion against it.
       - name: Published image carries no test credentials
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          # Verify the PUBLISHED artifact, not a local build wearing the same
+          # tag. Root's store holds the image it just pushed, so without this the
+          # check would inspect that and prove nothing about the registry.
+          MERIDIAN_VERIFY_PUBLISHED: "1"
         run: bash ci/check-no-test-user.sh '${{ steps.tag.outputs.tag }}'
 
       - name: Upload harness evidence

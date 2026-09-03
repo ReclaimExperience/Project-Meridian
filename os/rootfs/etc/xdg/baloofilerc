@@ -1,0 +1,19 @@
+# ADR-016: Baloo is disabled.
+#
+# Masking baloo_file.service was not enough, and the WP-02 perf run proved it:
+# baloo_file was resident at 28.4 MiB with the service masked. Baloo on Plasma 6
+# is not started by that unit — it is started by /etc/xdg/autostart/
+# baloo_file.desktop, which carries
+#
+#   X-KDE-autostart-condition=baloofilerc:Basic Settings:Indexing-Enabled:true
+#
+# and that condition defaults to TRUE when the key is absent. So the mask was
+# recorded in packages.yml as satisfying ADR-016 while the indexer ran anyway.
+# This file sets the key the autostart condition actually reads, which stops it
+# starting AND tells Baloo not to index if anything launches it another way.
+#
+# Why it matters beyond the memory: ADR-016 disables Baloo because a background
+# indexer on a five-year-old spinning disk is indistinguishable, to the person
+# using it, from the machine being broken.
+[Basic Settings]
+Indexing-Enabled=false

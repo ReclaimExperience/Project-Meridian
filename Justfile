@@ -138,11 +138,19 @@ test-lint:
     @echo
     @python3 tests/lint/test_packages_parser.py
     @echo
+    @python3 tests/lint/test_osk_autoconfig.py
+    @echo
     @python3 tests/harness/test_pcap.py
     @echo
     @python3 tests/harness/test_suite_guards.py
     @echo
     @python3 tests/harness/test_screendiff_stories.py
+    @echo
+    @python3 tests/harness/test_perf_gates.py
+    @echo
+    @python3 tests/harness/test_screen_presence.py
+    @echo
+    @python3 tests/harness/test_console_prompts.py
 
 # ------------------------------------------------------------------ build ---
 
@@ -185,7 +193,18 @@ build arch="x86_64":
     # job — which happened: "unable to copy from source ...fedora-kinoite:44:
     # unexpected EOF (while reconnecting)". Rule R-A treats flaky as broken, so
     # the transient case gets handled rather than re-run.
-    podman pull --retry 3 --retry-delay 5s --platform "${platform}" "${base}"
+    # Retry in shell rather than with `podman pull --retry`: that flag does not
+    # exist in podman 4.9 (Ubuntu 24.04), and PRD 7.2 requires every `just`
+    # target to run identically on a Linux workstation. Found on the x86_64 box.
+    for attempt in 1 2 3; do
+        podman pull --platform "${platform}" "${base}" && break
+        if [ "$attempt" = 3 ]; then
+            echo "just build: could not pull ${base} after 3 attempts"
+            exit 1
+        fi
+        echo "just build: pull failed, retrying in $((attempt * 5))s"
+        sleep $((attempt * 5))
+    done
 
     podman build \
         --platform "${platform}" \
@@ -438,9 +457,22 @@ baseline screen="all" arch="":
     [ "$arch" = "arm64" ] && arch=aarch64
     python3 tests/harness/run.py screens --arch "$arch" --baseline "{{ screen }}"
 
-# Perf gates: idle RAM and boot time (PRD 1.5)
-perf:
-    @just _todo WP-02 "perf"
+# Perf gates: idle RAM and boot time (PRD 2). One boot, both budgets.
+# `just perf idle_ram` / `just perf boot_time` enforce one; the default enforces
+# both. Every run measures and records both regardless — see tests/perf/.
+perf budget="" arch="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    arch="{{ arch }}"
+    [ -n "$arch" ] || arch="$(uname -m)"
+    [ "$arch" = "arm64" ] && arch=aarch64
+    case "{{ budget }}" in
+        "")          python3 tests/harness/run.py perf --arch "$arch" ;;
+        idle_ram)    tests/perf/idle_ram.sh --arch "$arch" ;;
+        boot_time)   tests/perf/boot_time.sh --arch "$arch" ;;
+        *) echo "just perf: unknown budget '{{ budget }}' (idle_ram, boot_time, or empty for both)" >&2
+           exit 2 ;;
+    esac
 
 # ----------------------------------------------------------------- assets ---
 

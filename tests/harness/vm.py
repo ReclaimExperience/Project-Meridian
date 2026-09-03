@@ -24,6 +24,7 @@ import platform
 import shutil
 import signal
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -132,6 +133,11 @@ class VM:
     capture: bool = False  # write every guest packet to a pcap (ADR-011 audit)
     evidence: Path = field(default=None)  # type: ignore[assignment]
     _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
+    _started_at: float | None = field(default=None, init=False, repr=False)
+    # Set in start(). Screenshots are impossible under GL (the framebuffer is a
+    # dmabuf, so QMP screendump answers "no surface"), and callers need to know
+    # rather than discovering it as a crash mid-suite.
+    gl: bool = field(default=False, init=False, repr=False)
     _qmp: QMP | None = field(default=None, init=False, repr=False)
     _console: Console | None = field(default=None, init=False, repr=False)
 
@@ -183,6 +189,27 @@ class VM:
         else:
             firmware = ["-bios", code]
 
+        # MERIDIAN_VM_GL=1 gives the guest a GL-accelerated virtio GPU via the
+        # host's DRM render node, instead of letting it fall back to llvmpipe.
+        #
+        # OFF by default, deliberately: PRD 2 defines the idle-RAM budget in a
+        # 4 GB VM, and silently changing how that VM renders would change the
+        # number the gate compares against without anyone deciding to. It exists
+        # so the software-rendering tax can be MEASURED — the first real runs came
+        # in ~300 MiB over budget with the guest on llvmpipe, and nobody could say
+        # how much of that was Plasma and how much was the absence of a GPU.
+        #
+        # Needs a readable /dev/dri/renderD128 on the host, so it is unavailable
+        # on hosted CI runners.
+        gl = os.environ.get("MERIDIAN_VM_GL") == "1"
+        self.gl = gl
+        if gl and not Path("/dev/dri/renderD128").exists():
+            raise VMError(
+                "MERIDIAN_VM_GL=1 but /dev/dri/renderD128 does not exist. Refusing "
+                "to fall back to software rendering silently — the entire point of "
+                "this switch is to know which one produced the number."
+            )
+
         if self.arch == "aarch64":
             machine = [
                 "-M",
@@ -190,10 +217,17 @@ class VM:
                 "-cpu",
                 "host" if accel == "hvf" else "max",
                 "-device",
-                "virtio-gpu-pci",
+                "virtio-gpu-gl-pci" if gl else "virtio-gpu-pci",
             ]
         else:
-            machine = ["-M", "q35", "-device", "virtio-vga"]
+            machine = [
+                "-M",
+                "q35",
+                "-device",
+                "virtio-vga-gl" if gl else "virtio-vga",
+            ]
+        if gl:
+            print("vm: GL enabled (virtio GPU on the host render node)")
 
         self.qmp_socket.unlink(missing_ok=True)
         self.serial_socket.unlink(missing_ok=True)
@@ -235,13 +269,18 @@ class VM:
             "-device",
             "usb-tablet",
             "-display",
-            "none",
+            "egl-headless" if gl else "none",
             "-serial",
             f"unix:{self.serial_socket},server,nowait",
             "-qmp",
             f"unix:{self.qmp_socket},server,nowait",
         ]
         print(f"vm: booting {self.disk.name} arch={self.arch} accel={accel}")
+        # Stamped immediately before exec so the perf suite measures the guest's
+        # boot rather than this process's setup. Host wall-clock is only ever a
+        # cross-check: the boot-time gate reads systemd's own timestamps, which
+        # do not move when a loaded CI runner is slow to fork qemu.
+        self._started_at = time.monotonic()
         self._process = subprocess.Popen(
             command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
         )
@@ -260,6 +299,13 @@ class VM:
         return "qemu said:\n  " + (self._process.stderr.read() or "").strip().replace(
             "\n", "\n  "
         )
+
+    @property
+    def uptime_seconds(self) -> float:
+        """Host wall-clock since qemu was exec'd."""
+        if self._started_at is None:
+            raise VMError("VM is not started")
+        return time.monotonic() - self._started_at
 
     @property
     def console(self) -> Console:

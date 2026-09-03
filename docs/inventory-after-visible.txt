@@ -1,0 +1,27 @@
+# Launcher-visible desktop entries AFTER de-bloat (WP-02)
+#
+# 17 entries, down from 34. PRD 3.2 calls for ~12, so this is closer but not
+# there yet. What remains are entries whose packages Plasma itself depends on —
+# konsole and kmenuedit are dependency-locked, and fcitx5 ships three. Those are
+# HIDDEN rather than removed, which is WP-07's KIOSK work and ADR-006's stated
+# precedent: hidden is not removed, and removing them takes the desktop with them.
+#
+# Format: owning-package|Name
+
+ark|Ark
+dolphin|Dolphin
+fcitx5-configtool|Keyboard layout viewer
+fcitx5-data|Fcitx 5
+fcitx5-data|Fcitx 5 Configuration
+gwenview|Gwenview
+haruna|Haruna
+kcalc|KCalc
+kmenuedit|Menu Editor
+konsole|Konsole
+kwrite|KWrite
+okular|Okular
+plasma-desktop|Emoji Selector
+plasma-systemmonitor|System Monitor
+plasma-systemsettings|KDE System Settings
+plasma-systemsettings|System Settings
+spectacle|Spectacle

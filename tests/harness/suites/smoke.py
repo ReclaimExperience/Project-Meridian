@@ -23,6 +23,7 @@ because a registry hiccup must never read as a broken image.
 
 from __future__ import annotations
 
+from harness.screen import wait_for_screen
 from harness.vm import VM
 
 
@@ -53,8 +54,13 @@ def run(vm: VM, credentials: dict) -> None:
     # SDDM's Breeze theme opens on a clock overlay and reveals the password
     # field only on input - WP-01's first screenshot was misread for want of it.
     vm.qmp.wake_display()
-    print(f"smoke: greeter screenshot {vm.screenshot('smoke-greeter').name}")
     assert vm.qmp.is_running(), "VM stopped running before the greeter appeared"
+    # Not a screenshot — a check. A nightly run captured a greeter frame in which
+    # every pixel was black, printed its filename as though that were evidence,
+    # typed the password into nothing, and then failed 420 seconds later blaming
+    # plasmashell. Nothing had rendered at all. Proving the greeter is on screen
+    # before typing into it is the difference between a diagnosis and a guess.
+    wait_for_screen(vm, "the greeter", keep_as="smoke-greeter")
 
     # --- 4. a real GUI login -------------------------------------------------
     #

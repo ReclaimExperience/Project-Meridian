@@ -1,0 +1,12 @@
+# Record that this machine has ever had a touchscreen (ADR-018 §6).
+#
+# Eager and sticky, by design. The question "is there a touchscreen" only has to
+# be answered YES once: a digitizer whose driver loads late, a 2-in-1 that was
+# docked, a USB touchscreen plugged in after boot — each of those is a machine
+# that needs an on-screen keyboard, and the previous mechanism could answer "no"
+# for all three because it asked once at boot and never again.
+#
+# The marker is never removed here. Disable is lazy (see osk-session-config):
+# losing a touchscreen is not urgent, and forgetting one is.
+ACTION=="add|change", ENV{ID_INPUT_TOUCHSCREEN}=="1", \
+  RUN+="/usr/libexec/meridian/osk-mark-touch"

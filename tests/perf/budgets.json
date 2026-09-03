@@ -1,0 +1,137 @@
+{
+  "_comment": [
+    "PRD section 2's performance budgets. Rule R-E: budgets are laws — a gate is",
+    "never edited to make a build pass. ADR-018 §4: the absolute budget changes",
+    "only by ADR, with measured floor provenance.",
+    "",
+    "THREE INSTRUMENTS, THREE NATURES (ADR-020 §1). The previous three budgets all",
+    "shared one defect: a single number bounded quantities of different natures and",
+    "inherited the worst behaviour of whichever term was noisiest.",
+    "",
+    "  steady   AnonPages + SUnreclaim + KernelStack + PageTables.",
+    "           Process and kernel memory. Stable to ~9 MiB, so it can carry a",
+    "           TIGHT gate that means something. Median of 3 full boots.",
+    "",
+    "  shmem    Shared memory — on Wayland, largely wl_shm graphics buffers. Not",
+    "           stable and never will be, so it gets a CEILING rather than a",
+    "           budget, sampled at its MINIMUM over a post-settle window so the",
+    "           number describes the resting pool rather than a transient peak.",
+    "",
+    "  ratchet  Summed userspace PSS against a rolling baseline. The creep",
+    "           detector and, on the evidence, the steadiest thing we measure.",
+    "",
+    "MemTotal-MemAvailable and total committed are still recorded per run and gate",
+    "NOTHING. The first is kept because it is what `free` prints and therefore what",
+    "a user would quote back to us — the number in the conversation, not the gate.",
+    "",
+    "ram.idle.ci is still product + offset, COMPUTED and never written down as a",
+    "literal, so the CI gate cannot move without editing the offset's provenance."
+  ],
+  "protocol": {
+    "runs": 3,
+    "statistic": "median",
+    "settle_seconds": 120,
+    "shmem_window_seconds": 60,
+    "shmem_sample_interval_seconds": 5,
+    "why": [
+      "ADR-018 §1: median of 3 FULL boots, all values recorded — one run with",
+      "~50 MiB of noise once decided a gate with under 4 MiB of headroom.",
+      "ADR-020 §1b: after the settle, shmem is sampled across a 60 s window and",
+      "the MINIMUM taken, because a ceiling on a buffer pool should bound where",
+      "it rests, not where it happened to be when we looked."
+    ]
+  },
+  "steady": {
+    "gate_mib": 800,
+    "target_mib": 775,
+    "components": ["AnonPages", "SUnreclaim", "KernelStack", "PageTables"],
+    "conditions": "median of 3 runs, 2-minute settle each, 4 GB, GPU-rendered (ADR-020 §1a)",
+    "canonical_seat": "PRD 10.2 low-end row: 4 GB RAM, integrated GPU",
+    "floor_provenance": {
+      "measured_runs_mib": [757.4, 766.7, 762.6],
+      "median_mib": 762.6,
+      "spread_mib": 9.3,
+      "formula": "gate = round_up_25(median + 2*spread); target = round_up_25(median + spread)",
+      "date": "2026-09-03",
+      "note": "ADR-020 §2: these numbers are DERIVED from this set, so acceptance may not be declared on it. One fresh median-of-3 is required."
+    }
+  },
+  "shmem": {
+    "ceiling_mib": 250,
+    "sampling": "minimum over a 60 s window after the settle",
+    "basis": "round_up_25(2 x observed maximum 117.8 MiB)",
+    "observed_runs_mib": [117.8, 55.3, 53.4],
+    "status": "provisional — pending ADR-020 §4 (the 117.8 outlier) and §3's renderer pair",
+    "why": "A tripwire against a genuine buffer-pool regression, not a budget to tune against. Deliberately loose."
+  },
+  "userspace_pss": {
+    "denomination": "llvmpipe (CI)",
+    "interim_seed_mib": 755.3,
+    "rolling_baseline_mib": null,
+    "rolling_window_runs": 10,
+    "allowed_delta_mib": 25,
+    "acknowledgement_marker": "PSS-DELTA-ACK:",
+    "gpu_reference_mib": 574.0,
+    "pairing_gap_mib": 181.3,
+    "seed_provenance": {
+      "llvmpipe_mib": 755.3,
+      "gpu_mib": 574.0,
+      "method": "ADR-020 §3 paired run, same build, median of 3 each",
+      "build_id": "31032e44b327eac8",
+      "plasma": "6.7.4-2.fc44",
+      "mesa": "26.1.4-4.fc44",
+      "date": "2026-09-03",
+      "adopted_by": "ADR-021 §1"
+    },
+    "why": [
+      "ADR-021. The ratchet is a CI instrument, so its baseline is measured in",
+      "CI's denomination. ADR-018 §3 seeded it at 576 — GPU-measured — and the",
+      "ratchet then fired at +179 on every healthy pull request, because",
+      "llvmpipe's software-render cost is anonymous memory that PSS counts.",
+      "That is the same one-renderer-baseline / other-renderer-measurement",
+      "error ADR-017 fixed for idle RAM, one instrument over.",
+      "",
+      "NO OFFSET IS APPLIED HERE, and the asymmetry with `steady` is deliberate.",
+      "steady's canonical value is the GPU/product number, so its CI gate must",
+      "translate forever and stays a computed sum. The ratchet's canonical value",
+      "IS the CI history — it detects change over time where it runs — so it is",
+      "measured directly and the seed is only a bootstrap.",
+      "",
+      "The seed RETIRES once 10 main-branch nightly runs exist; the baseline is",
+      "then their rolling median, measured in CI. The retirement mechanism is",
+      "part of the decision because a temporary constant with nothing arranged",
+      "to remove it is a permanent one.",
+      "",
+      "The +25 threshold is unchanged and denomination-independent to first",
+      "order: a new resident service adds the same anonymous memory under both",
+      "renderers, so llvmpipe's overhead cancels in the delta.",
+      "",
+      "gpu_reference_mib is informational and for the M-gate pairing check only",
+      "(ADR-021 §3). It never gates, and the two are NEVER cross-compared."
+    ]
+  },
+  "render_offset": {
+    "value_mib": 188.2,
+    "denomination": "steady",
+    "method": "ADR-020 §3 paired run, same build: llvmpipe steady median 948.1 (941.7/948.1/952.6) minus GPU steady median 759.9 (763.8/757.4/759.9)",
+    "build_id": "31032e44b327eac8",
+    "plasma": "6.7.4-2.fc44",
+    "mesa": "26.1.4-4.fc44",
+    "kernel": "7.1.12-200.fc44",
+    "date": "2026-09-03",
+    "measured_by": "WP-02, issue #32; adopted under ADR-020 §3",
+    "supersedes": "186.5 MiB and 182 MiB, both denominated in MemTotal-MemAvailable and retired with it",
+    "note": "Landing within 1.7 MiB of the old-metric 186.5 is a coincidence of two different denominations, not a confirmation. It is only evidence that llvmpipe's cost is mostly anonymous memory, which both statistics count.",
+    "recalibrate": "at every M-gate (ADR-017 §3); >25% drift is a finding, not an update"
+  },
+  "informational": {
+    "idle_ram_mib": "MemTotal - MemAvailable. Recorded per run, gates nothing (ADR-020 §1). What `free` shows.",
+    "committed_mib": "steady + Shmem. Recorded per run, gates nothing — ADR-019's trigger rejected it because Shmem's variance dominated it."
+  },
+  "boot_seconds": {
+    "gate": 15,
+    "target": 10,
+    "conditions": "cold boot, power-on to login screen, virtio SSD VM (PRD 2)",
+    "note": "Read from systemd's own firmware+loader+kernel+userspace total. Host-page-cache sensitive: the same image measured 16.9 s cold and 7.8 s warm, so a single over-gate reading on a busy host is not by itself a regression."
+  }
+}
