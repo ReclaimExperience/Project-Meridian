@@ -732,8 +732,29 @@ Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
   stored. A **relative ratchet** on summed userspace PSS (baseline 576, +25 MiB)
   is now the creep detector, because a gate slack enough not to be a coin flip is
   slack enough to hide steady growth.
+- **IDLE-RAM ACCEPTANCE: MET (2026-09-03, ADR-020 §2).** Fresh median-of-3 on a
+  new build, GPU-rendered, under ADR-020's instruments:
+
+  | instrument | measured | gate | verdict |
+  |---|---|---|---|
+  | `steady` | **759.9** MiB (763.8 / 757.4 / 759.9, spread **6.4**) | 800 (target 775) | inside the **target** |
+  | `shmem` at rest | worst **118.0** MiB (55.2 / 54.0 / 118.0) | 250 ceiling | within |
+  | userspace PSS ratchet | 574.0 MiB, **−2.0** vs baseline | +25 | quiet |
+
+  All three of clause 2's conditions met, so ADR-018 clause 7 closes. **40.1 MiB
+  of headroom against 6.4 MiB of noise** — decisive in both directions, which is
+  the property 1126, 1200 and the committed denomination all lacked. `boot` 8.3 s,
+  inside target; `baloo_file` absent; OSK absent.
+  Informational only: `MemTotal − MemAvailable` medians 1208.6 (spread 14.9) and
+  gates nothing.
+- **Evidence for ADR-020 §4's queued question.** The ~118 MiB shmem figure
+  recurred — but in **run 3** this time, where it was **run 1** before. So it is
+  **not** first-boot behaviour: shmem at rest is **bimodal** (~54 or ~118),
+  independent of run position. Two observations is not a characterisation, but it
+  rules out the simplest explanation and the 250 MiB ceiling comfortably covers
+  both modes.
 - **ADR-019 §0 trigger FAILED (2026-09-03). Nothing adopted; escalated per the
-  clause.** committed spread **59.2 MiB > 25 MiB threshold**, so the cache account
+  clause.** (Superseded by ADR-020, which split the instruments.) committed spread **59.2 MiB > 25 MiB threshold**, so the cache account
   I proposed is **wrong** — cache does vary (50.9) but is not where the metric's
   variance lives. The failure is single-source: **Shmem** moves 117.8/55.3/53.4
   (spread 64.4) while AnonPages holds ±9.3, SUnreclaim ±0.4, KernelStack ±0.1,
