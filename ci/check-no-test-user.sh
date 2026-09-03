@@ -31,17 +31,27 @@ fi
 echo "probing for account: ${ACCOUNT}"
 
 echo "checking published image for test access: ${REF}"
-# Only reach for the registry when the image is not already here: `podman pull`
-# on a present tag still round-trips, which hangs a local run for no reason.
+# MERIDIAN_VERIFY_PUBLISHED=1 forces a registry fetch even when a same-named
+# image is already in the local store. CI sets it, because this check's entire
+# purpose is the PUBLISHED artifact — inspecting a local build that happens to
+# share the tag proves nothing about what users would receive.
 #
-# In CI this now genuinely fetches the PUSHED image, which is what this check
-# always claimed to do. It did not before: CI built rootless as the same user
-# that ran this, so `image exists` was true and the local build was probed while
-# the comment above the workflow step said "not from a local build of it". The
-# build moved to root's store to skip an 8.7 GiB copy, and the side effect is
-# that this check became honest. The pull it now performs is the price of that,
-# and it is the right price — a published image nobody fetched is unverified.
-if ! podman image exists "$REF" 2>/dev/null; then
+# It did exactly that for a while and nobody could tell: CI built rootless as
+# the same user that ran this, `image exists` was true, and the local build was
+# probed while the workflow step above it said "not from a local build of it".
+#
+# Locally the default stays "use what is here": `podman pull` on a present tag
+# still round-trips, and hanging a developer's run to re-download an image they
+# just built is a poor trade.
+if [[ "${MERIDIAN_VERIFY_PUBLISHED:-}" == "1" ]]; then
+    echo "  MERIDIAN_VERIFY_PUBLISHED=1 — fetching from the registry"
+    if ! podman pull -q "$REF" >/dev/null 2>&1; then
+        echo "FAIL — could not fetch ${REF} from the registry, so it has NOT"
+        echo "       been checked. This mode exists to verify the published"
+        echo "       artifact; falling back to a local copy would defeat it."
+        exit 1
+    fi
+elif ! podman image exists "$REF" 2>/dev/null; then
     if ! podman pull -q "$REF" >/dev/null 2>&1; then
         # Exit 1, not whatever podman returned: a non-zero status here means
         # "could not check", and the caller must not have to distinguish
