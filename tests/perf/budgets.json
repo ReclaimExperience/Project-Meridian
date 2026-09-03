@@ -1,88 +1,90 @@
 {
   "_comment": [
     "PRD section 2's performance budgets. Rule R-E: budgets are laws — a gate is",
-    "never edited to make a build pass. ADR-018 clause 4: the absolute budget",
-    "changes only by ADR, with measured floor provenance.",
+    "never edited to make a build pass. ADR-018 §4: the absolute budget changes",
+    "only by ADR, with measured floor provenance.",
     "",
-    "IDLE RAM HAS TWO NAMES ON PURPOSE (ADR-017). They are different numbers and",
-    "conflating them turned a 116 MiB problem into a 300 MiB one:",
+    "THREE INSTRUMENTS, THREE NATURES (ADR-020 §1). The previous three budgets all",
+    "shared one defect: a single number bounded quantities of different natures and",
+    "inherited the worst behaviour of whichever term was noisiest.",
     "",
-    "  ram.idle.product = idle_ram.product.gate_mib",
-    "      The PRD 1.5 metric. GPU-rendered, on the 10.2 low-end row. The only",
-    "      number a release claim may cite.",
+    "  steady   AnonPages + SUnreclaim + KernelStack + PageTables.",
+    "           Process and kernel memory. Stable to ~9 MiB, so it can carry a",
+    "           TIGHT gate that means something. Median of 3 full boots.",
     "",
-    "  ram.idle.ci      = product.gate_mib + render_offset.value_mib",
-    "      The per-PR tripwire, on the llvmpipe VM CI can actually run. COMPUTED",
-    "      from the two fields, and deliberately never written down anywhere as a",
-    "      number of its own, so the CI gate cannot move without editing the",
-    "      offset's provenance and saying what was re-measured. A test enforces",
-    "      its absence.",
+    "  shmem    Shared memory — on Wayland, largely wl_shm graphics buffers. Not",
+    "           stable and never will be, so it gets a CEILING rather than a",
+    "           budget, sampled at its MINIMUM over a post-settle window so the",
+    "           number describes the resting pool rather than a transient peak.",
     "",
-    "AND TWO KINDS OF GATE (ADR-018 clause 3). The absolute budget is slack enough",
-    "not to be a coin flip, which makes it slack enough to hide steady creep. So",
-    "the blocking gate is absolute and the SENSITIVE one is relative: summed",
-    "userspace PSS against a rolling baseline. They catch different failures and",
-    "neither substitutes for the other."
+    "  ratchet  Summed userspace PSS against a rolling baseline. The creep",
+    "           detector and, on the evidence, the steadiest thing we measure.",
+    "",
+    "MemTotal-MemAvailable and total committed are still recorded per run and gate",
+    "NOTHING. The first is kept because it is what `free` prints and therefore what",
+    "a user would quote back to us — the number in the conversation, not the gate.",
+    "",
+    "ram.idle.ci is still product + offset, COMPUTED and never written down as a",
+    "literal, so the CI gate cannot move without editing the offset's provenance."
   ],
   "protocol": {
     "runs": 3,
     "statistic": "median",
     "settle_seconds": 120,
+    "shmem_window_seconds": 60,
+    "shmem_sample_interval_seconds": 5,
     "why": [
-      "ADR-018 clause 1. ADR-017 fixed what is measured and left how often",
-      "undefined, so one run with ~50 MiB of noise decided a gate with under",
-      "4 MiB of headroom — a coin flip in both directions. Three runs, median,",
-      "and ALL THREE VALUES RECORDED so a marginal build reads as marginal",
-      "instead of as whichever number happened to land."
+      "ADR-018 §1: median of 3 FULL boots, all values recorded — one run with",
+      "~50 MiB of noise once decided a gate with under 4 MiB of headroom.",
+      "ADR-020 §1b: after the settle, shmem is sampled across a 60 s window and",
+      "the MINIMUM taken, because a ceiling on a buffer pool should bound where",
+      "it rests, not where it happened to be when we looked."
     ]
   },
-  "idle_ram": {
-    "product": {
-      "gate_mib": 1200,
-      "target_mib": 1100,
-      "aspiration_mib": 950,
-      "conditions": "median of 3 runs, 2-minute settle each, 4 GB, GPU-rendered (ADR-017 §1, ADR-018 §1)",
-      "canonical_seat": "PRD 10.2 low-end row: 4 GB RAM, integrated GPU",
-      "interim_source": "the owner's GPU-accelerated local VM (MERIDIAN_VM_GL=1, virgl), until that machine exists",
-      "floor_provenance": {
-        "measured_runs_mib": [1123.1, 1122.4, 1174.1],
-        "mean_mib": 1139.9,
-        "median_mib": 1123.1,
-        "noise_spread_mib": 51.7,
-        "date": "2026-09-03",
-        "basis": "ADR-018 clause 2: measured post-trim floor plus one observed noise-spread of headroom",
-        "note": "The previous 1126 gate predated any GPU-measured evidence — a proxy carried forward, not a floor anyone had observed."
-      },
-      "aspiration_note": "950 was the pre-evidence target. ADR-018 clause 2 reclassifies it as an aspiration contingent on the clause 5 investigation (Xwayland on-demand, kded module audit, KRunner preload). It gates NOTHING. If the investigation finds nothing, revise it by ADR rather than leave it standing as decoration."
-    },
-    "render_offset": {
-      "value_mib": 186.5,
-      "method": "paired measurement, same post-trim image, both renderers: llvmpipe 1326.4 MiB minus GPU mean 1139.9 MiB (runs 1123.1, 1122.4, 1174.1)",
-      "build_id": "31032e44b327eac8",
-      "image_version": "1.0.0-dev",
-      "plasma": "6.7.4-2.fc44",
-      "mesa": "26.1.4-4.fc44",
-      "kernel": "7.1.12-200.fc44",
+  "steady": {
+    "gate_mib": 800,
+    "target_mib": 775,
+    "components": ["AnonPages", "SUnreclaim", "KernelStack", "PageTables"],
+    "conditions": "median of 3 runs, 2-minute settle each, 4 GB, GPU-rendered (ADR-020 §1a)",
+    "canonical_seat": "PRD 10.2 low-end row: 4 GB RAM, integrated GPU",
+    "floor_provenance": {
+      "measured_runs_mib": [757.4, 766.7, 762.6],
+      "median_mib": 762.6,
+      "spread_mib": 9.3,
+      "formula": "gate = round_up_25(median + 2*spread); target = round_up_25(median + spread)",
       "date": "2026-09-03",
-      "measured_by": "WP-02, issue #32; adopted by ADR-018 clause 2",
-      "supersedes": "182 MiB, measured 2026-09-03 pre-trim; drift +2.5%, inside ADR-017 clause 3's 25% threshold",
-      "recalibrate": "at every M-gate (ADR-017 clause 3); >25% drift is a finding, not an update"
+      "note": "ADR-020 §2: these numbers are DERIVED from this set, so acceptance may not be declared on it. One fresh median-of-3 is required."
     }
+  },
+  "shmem": {
+    "ceiling_mib": 250,
+    "sampling": "minimum over a 60 s window after the settle",
+    "basis": "round_up_25(2 x observed maximum 117.8 MiB)",
+    "observed_runs_mib": [117.8, 55.3, 53.4],
+    "status": "provisional — pending ADR-020 §4 (the 117.8 outlier) and §3's renderer pair",
+    "why": "A tripwire against a genuine buffer-pool regression, not a budget to tune against. Deliberately loose."
   },
   "userspace_pss": {
     "baseline_mib": 576,
     "allowed_delta_mib": 25,
-    "baseline_source": "median of the last 10 main-branch nightly runs (ADR-018 clause 3); the value here is the post-trim seed measured 2026-09-03",
+    "baseline_source": "median of the last 10 main-branch nightly runs (ADR-018 §3); the value here is the post-trim seed measured 2026-09-03",
+    "acknowledgement_marker": "PSS-DELTA-ACK:",
     "why": [
-      "The creep detector. The absolute gate has ~60 MiB of slack by",
-      "construction, so it cannot see a build that gets steadily heavier. This",
-      "can. A PR over the delta fails until the increase is acknowledged in the",
-      "PR body with a reason — the first gate here that can be passed by",
-      "explaining rather than fixing, which is intentional, because creep is",
-      "sometimes bought deliberately. The acknowledgement is part of the record",
-      "and should say what was bought."
-    ],
-    "acknowledgement_marker": "PSS-DELTA-ACK:"
+      "The creep detector. A PR over the delta fails until the increase is",
+      "acknowledged in the PR body with a reason — the one gate here that can be",
+      "passed by explaining rather than fixing, which is intentional, because",
+      "creep is sometimes bought deliberately."
+    ]
+  },
+  "render_offset": {
+    "value_mib": null,
+    "denomination": "steady",
+    "status": "NOT YET MEASURED in the steady denomination. ADR-020 §3 requires one paired GPU/llvmpipe run. The previous 186.5 was denominated in MemTotal-MemAvailable and retires with it; carrying it across denominations would be a fabricated constant.",
+    "supersedes": "186.5 MiB (old metric), 182 MiB (old metric, pre-trim)"
+  },
+  "informational": {
+    "idle_ram_mib": "MemTotal - MemAvailable. Recorded per run, gates nothing (ADR-020 §1). What `free` shows.",
+    "committed_mib": "steady + Shmem. Recorded per run, gates nothing — ADR-019's trigger rejected it because Shmem's variance dominated it."
   },
   "boot_seconds": {
     "gate": 15,

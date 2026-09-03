@@ -40,6 +40,13 @@ BUDGETS = json.loads(
 
 SETTLE_SECONDS = BUDGETS["protocol"]["settle_seconds"]
 PROTOCOL_RUNS = BUDGETS["protocol"]["runs"]
+SHMEM_WINDOW_SECONDS = BUDGETS["protocol"]["shmem_window_seconds"]
+SHMEM_INTERVAL_SECONDS = BUDGETS["protocol"]["shmem_sample_interval_seconds"]
+
+MEMINFO_FIELDS = (
+    "MemTotal|MemAvailable|MemFree|Cached|Buffers|Slab|SReclaimable|SUnreclaim|"
+    "AnonPages|PageTables|Shmem|KernelStack|Mapped|Dirty"
+)
 
 # Processes an ADR says must not be running once the desktop is idle, and why.
 # This belongs to the perf suite because "is it running" and "what does idle
@@ -101,31 +108,23 @@ def _duration_seconds(value: str) -> float:
     return seconds
 
 
-def idle_ram_budget(software_rendering: bool) -> tuple[int, int, str]:
-    """The applicable idle-RAM gate and target, and which name they are.
+def steady_budget(software_rendering: bool) -> tuple[float | None, float | None, str]:
+    """The applicable `steady` gate and target, and which name they are.
 
-    ADR-017: idle RAM has two names because it is two numbers.
-
-      ram.idle.product  GPU-rendered. The PRD 1.5 metric, and the only one a
-                        release claim may cite.
-      ram.idle.ci       product + render_offset. The llvmpipe VM we can run per
-                        PR. A tripwire, not evidence.
-
-    The CI gate is COMPUTED here and stored nowhere, so moving it means editing
-    the offset's provenance record in budgets.json and saying what was
-    re-measured — which is the difference between a calibration and a fudge.
-
-    Choosing by what the run ACTUALLY rendered with, not by a flag, is the whole
-    point: comparing a software-rendered number against the product gate is the
-    error that made this look like a 300 MiB problem when it was 116.
+    GPU-rendered runs gate on the product budget. Software-rendered runs would
+    gate on product + render_offset — but ADR-020 §3 requires that offset to be
+    re-paired in the STEADY denomination, and it has not been. The old 186.5 was
+    denominated in MemTotal-MemAvailable; carrying it across denominations would
+    be inventing a constant, so this returns None and the caller reports the
+    numbers without pretending to judge them.
     """
-    idle = BUDGETS["idle_ram"]
-    gate = idle["product"]["gate_mib"]
-    target = idle["product"]["target_mib"]
+    steady = BUDGETS["steady"]
     if not software_rendering:
-        return gate, target, "ram.idle.product"
-    offset = idle["render_offset"]["value_mib"]
-    return gate + offset, target + offset, "ram.idle.ci"
+        return steady["gate_mib"], steady["target_mib"], "steady.product"
+    offset = BUDGETS["render_offset"]["value_mib"]
+    if offset is None:
+        return None, None, "steady.ci (offset not yet measured)"
+    return steady["gate_mib"] + offset, steady["target_mib"] + offset, "steady.ci"
 
 
 def _verdict(
@@ -136,7 +135,7 @@ def _verdict(
     if measured > gate:
         return False, (
             f"{measured:.1f}{unit} EXCEEDS the {gate}{unit} gate "
-            f"({budget['conditions']}).\n"
+            f"({budget.get('conditions', 'no conditions recorded')}).\n"
             "  PRD WP-02: if this is over the gate, escalate — do not hide it, "
             "and do not edit the budget (rule R-E)."
         )
@@ -249,9 +248,7 @@ def measure(vm: VM, credentials: dict) -> dict:
     # Recording the parts is the difference between diagnosing that and arguing
     # about it.
     _status, meminfo = console.run(
-        "grep -E '^(MemTotal|MemAvailable|MemFree|Cached|Buffers|Slab|"
-        "SReclaimable|SUnreclaim|AnonPages|PageTables|Shmem|KernelStack|"
-        "Mapped|Dirty):' /proc/meminfo",
+        f"grep -E '^({MEMINFO_FIELDS}):' /proc/meminfo",
         timeout=60,
     )
     fields = {
@@ -339,23 +336,50 @@ def measure(vm: VM, credentials: dict) -> dict:
     # will be; counting it made three structurally identical runs differ by
     # 75.4 MiB. Recorded alongside the old metric, gating nothing until the
     # clause 0 trigger says whether the cache account actually holds.
-    COMMITTED_KEYS = ("AnonPages", "Shmem", "SUnreclaim", "KernelStack", "PageTables")
-    missing_committed = [k for k in COMMITTED_KEYS if k not in fields]
-    if missing_committed:
+    # ADR-020 §1a. Shmem is deliberately NOT here: ADR-019's trigger rejected the
+    # combined statistic because Shmem's 64.4 MiB spread WAS the whole variance,
+    # while these four together moved by under 1 MiB. Splitting them is what lets
+    # this one carry a tight gate.
+    STEADY_KEYS = ("AnonPages", "SUnreclaim", "KernelStack", "PageTables")
+    missing_steady = [k for k in STEADY_KEYS if k not in fields]
+    if missing_steady:
         raise AssertionError(
-            f"/proc/meminfo did not report {missing_committed}, so the committed "
-            "statistic cannot be computed. Refusing to report a partial sum under "
-            "a name that means a specific set of fields.\n"
-            f"  guest said: {meminfo.strip()!r}"
+            f"/proc/meminfo did not report {missing_steady}, so `steady` cannot be "
+            "computed. Refusing to report a partial sum under a name that means a "
+            f"specific set of fields.\n  guest said: {meminfo.strip()!r}"
         )
-    committed_mib = sum(fields[k] for k in COMMITTED_KEYS) / 1024
+    steady_mib = sum(fields[k] for k in STEADY_KEYS) / 1024
+    committed_mib = steady_mib + fields.get("Shmem", 0) / 1024
     reclaimable_mib = (
         fields.get("Cached", 0)
         + fields.get("Buffers", 0)
         + fields.get("SReclaimable", 0)
     ) / 1024
 
+    # ADR-020 §1b: bound where the buffer pool RESTS, not where it happened to be
+    # when we looked. A single sample of Shmem caught 117.8 MiB in one run and
+    # ~54 in two others; the minimum across a window is the resting level, and a
+    # ceiling on a transient peak would be a ceiling on luck.
+    print(f"perf: sampling shmem for {SHMEM_WINDOW_SECONDS}s to find its resting level")
+    shmem_samples = []
+    deadline = time.monotonic() + SHMEM_WINDOW_SECONDS
+    while time.monotonic() < deadline:
+        _status, shm = console.run("grep '^Shmem:' /proc/meminfo", timeout=30)
+        found = re.search(r"Shmem:\s+(\d+) kB", shm)
+        if found:
+            shmem_samples.append(int(found.group(1)) / 1024)
+        time.sleep(SHMEM_INTERVAL_SECONDS)
+    if not shmem_samples:
+        raise AssertionError(
+            "could not read Shmem across the sampling window; refusing to report a "
+            "ceiling measurement this run did not take."
+        )
+    shmem_min_mib = min(shmem_samples)
+
     return {
+        "steady_mib": round(steady_mib, 1),
+        "shmem_min_mib": round(shmem_min_mib, 1),
+        "shmem_samples_mib": [round(v, 1) for v in shmem_samples],
         "idle_ram_mib": round(used_mib, 1),
         "committed_mib": round(committed_mib, 1),
         "reclaimable_mib": round(reclaimable_mib, 1),
@@ -385,133 +409,150 @@ def median(values: list[float]) -> float:
 
 
 def apply_gates(measurements: list[dict], vm: VM, only: str | None = None) -> None:
-    """Judge the PROTOCOL statistic, not a single boot (ADR-018 clause 1).
+    """Judge the three instruments ADR-020 §1 defines, each per its own nature.
 
-    Every value is recorded, not just the median. A build sitting on the line
-    must read as sitting on the line: the 2026-09-03 result was 1123.1 / 1122.4 /
-    1174.1, and reporting any one of those alone would have been a fair summary
-    of nothing.
+    Gates apply to the protocol statistic, never to a single boot. Everything is
+    recorded whether or not it gates, because the number that gates and the
+    number a user quotes back to us are not the same number.
     """
     stat = BUDGETS["protocol"]["statistic"]
     assert stat == "median", f"unsupported protocol statistic {stat!r}"
 
-    ram_values = [m["idle_ram_mib"] for m in measurements]
+    steady_values = [m["steady_mib"] for m in measurements]
+    shmem_values = [m["shmem_min_mib"] for m in measurements]
+    pss_values = [m.get("pss_total_visible_mib", 0.0) for m in measurements]
+    idle_values = [m["idle_ram_mib"] for m in measurements]
     boot_values = [m["boot_seconds"] for m in measurements]
     software = bool(measurements[-1].get("software_rendering"))
-    pss_values = [m.get("pss_total_visible_mib", 0.0) for m in measurements]
 
-    committed_values = [m["committed_mib"] for m in measurements]
-    ram = median(ram_values)
+    steady = median(steady_values)
     boot = median(boot_values)
     pss = median(pss_values)
+    # A CEILING, not a budget: each per-run figure is already the resting level,
+    # so the question is whether the pool ever RESTED above the line — the worst
+    # of them, not the middle one. Medianing here would let one run at 300 hide.
+    shmem_worst = max(shmem_values)
 
-    ram_gate, ram_target, ram_name = idle_ram_budget(software)
+    gate, target, name = steady_budget(software)
     results = {
         "protocol": {
             "runs": len(measurements),
             "statistic": stat,
-            "idle_ram_mib_runs": ram_values,
-            "boot_seconds_runs": boot_values,
+            "steady_mib_runs": steady_values,
+            "shmem_min_mib_runs": shmem_values,
             "userspace_pss_mib_runs": pss_values,
-            "committed_mib_runs": [m.get("committed_mib") for m in measurements],
-            "reclaimable_mib_runs": [m.get("reclaimable_mib") for m in measurements],
-            "spread_mib": round(max(ram_values) - min(ram_values), 1),
+            "idle_ram_mib_runs": idle_values,
+            "boot_seconds_runs": boot_values,
+            "steady_spread_mib": round(max(steady_values) - min(steady_values), 1),
+            "idle_ram_spread_mib": round(max(idle_values) - min(idle_values), 1),
         },
-        "idle_ram_mib": round(ram, 1),
-        "boot_seconds": round(boot, 2),
+        "steady_mib": round(steady, 1),
+        "shmem_worst_min_mib": round(shmem_worst, 1),
         "userspace_pss_mib": round(pss, 1),
+        "idle_ram_mib": round(median(idle_values), 1),
+        "boot_seconds": round(boot, 2),
         "software_rendering": software,
-        "idle_ram_budget_name": ram_name,
-        "idle_ram_gate_mib": ram_gate,
-        "idle_ram_target_mib": ram_target,
+        "steady_budget_name": name,
+        "steady_gate_mib": gate,
         "measurements": measurements,
     }
 
-    committed_spread = round(max(committed_values) - min(committed_values), 1)
-    results["committed_mib"] = round(median(committed_values), 1)
-    results["protocol"]["committed_spread_mib"] = committed_spread
+    spread = results["protocol"]["steady_spread_mib"]
     print(
-        f"perf: protocol = {stat} of {len(measurements)} run(s); "
-        f"idle RAM {ram_values} -> {ram:.1f} MiB (spread "
-        f"{results['protocol']['spread_mib']} MiB)"
+        f"perf: steady {steady_values} -> {steady:.1f} MiB "
+        f"(spread {spread} MiB) [{stat} of {len(measurements)}]"
     )
-    # ADR-019 clause 0's trigger, printed where the decision is made.
+    print(f"perf: shmem at rest {shmem_values} -> worst {shmem_worst:.1f} MiB")
     print(
-        f"perf: committed {committed_values} -> {results['committed_mib']:.1f} MiB "
-        f"(spread {committed_spread} MiB)"
+        f"perf: informational — idle (Mem-Avail) {idle_values} -> "
+        f"{results['idle_ram_mib']:.1f} MiB, spread "
+        f"{results['protocol']['idle_ram_spread_mib']} MiB (gates nothing)"
     )
-    print(
-        f"perf: ADR-019 §0 trigger — committed spread {committed_spread} MiB "
-        f"{'<=' if committed_spread <= 25 else '>'} 25 MiB threshold"
-    )
-    if software:
-        offset = BUDGETS["idle_ram"]["render_offset"]
-        print(
-            f"perf: gating on {ram_name} = {ram_gate} MiB "
-            f"({BUDGETS['idle_ram']['product']['gate_mib']} product + "
-            f"{offset['value_mib']} render offset, ADR-017)."
-        )
-        print("perf: this is the TRIPWIRE, not the product number. A green run here")
-        print("perf: does not support a claim about idle RAM on real hardware.")
-    else:
-        print(f"perf: gating on {ram_name} = {ram_gate} MiB (GPU-rendered, ADR-017)")
 
     failures = []
-    for name, detail in measurements[-1].get("forbidden_running", {}).items():
-        print(f"perf: {name} is RUNNING and must not be")
+
+    # --- 1a. steady: the tight absolute gate --------------------------------
+    if gate is None:
+        print(
+            f"perf: steady {steady:.1f} MiB — NOT GATED: {name}.\n"
+            "perf: ADR-020 §3 needs one paired GPU/llvmpipe run before a\n"
+            "perf: software-rendered figure can be judged. Reporting, not judging."
+        )
+        results["steady_within_gate"] = None
+    else:
+        ok, message = _verdict(
+            "steady",
+            steady,
+            " MiB",
+            {"gate": gate, "target": target, "conditions": name},
+        )
+        print(f"perf: steady {'ok' if ok else 'OVER GATE'} — {message}")
+        results["steady_within_gate"] = ok
+        if not ok and (only is None or only in ("steady", "idle_ram_mib")):
+            failures.append(f"steady: {message}")
+
+    # --- 1b. shmem: a ceiling on the resting buffer pool --------------------
+    ceiling = BUDGETS["shmem"]["ceiling_mib"]
+    results["shmem_ceiling_mib"] = ceiling
+    if shmem_worst > ceiling:
+        results["shmem_within_ceiling"] = False
         failures.append(
-            f"{name} is running at idle.\n  {FORBIDDEN_AT_IDLE[name]}\n"
+            f"shared memory rested at {shmem_worst:.1f} MiB, over the "
+            f"{ceiling} MiB ceiling.\n"
+            "  This is a tripwire against a buffer-pool regression, not a budget\n"
+            "  to tune against (ADR-020 §1b). It is deliberately loose — twice the\n"
+            "  largest figure ever observed — so exceeding it means something\n"
+            "  changed about how the compositor holds buffers, not that the\n"
+            "  desktop got slightly heavier."
+        )
+        print(f"perf: shmem OVER CEILING — {shmem_worst:.1f} > {ceiling} MiB")
+    else:
+        results["shmem_within_ceiling"] = True
+        print(
+            f"perf: shmem at rest {shmem_worst:.1f} MiB, within the {ceiling} MiB "
+            "ceiling"
+        )
+
+    # --- 1c. the ratchet ----------------------------------------------------
+    ratchet = BUDGETS["userspace_pss"]
+    delta = pss - ratchet["baseline_mib"]
+    results["userspace_pss_delta_mib"] = round(delta, 1)
+    if delta > ratchet["allowed_delta_mib"]:
+        results["userspace_pss_over"] = True
+        print(f"perf: userspace PSS {pss:.1f} MiB, {delta:+.1f} over baseline")
+        failures.append(
+            f"userspace PSS rose {delta:.1f} MiB over baseline "
+            f"({ratchet['baseline_mib']} MiB), past the "
+            f"{ratchet['allowed_delta_mib']} MiB the ratchet allows.\n"
+            "  This is the creep detector (ADR-018 §3): the absolute gate has\n"
+            "  slack by construction and cannot see steady growth.\n"
+            f"  If intended, acknowledge it in the PR body with\n"
+            f"  '{ratchet['acknowledgement_marker']} <reason>' saying what was\n"
+            "  bought. Passing by explaining is allowed; passing silently is not."
+        )
+    else:
+        results["userspace_pss_over"] = False
+        print(
+            f"perf: userspace PSS {pss:.1f} MiB, {delta:+.1f} vs baseline "
+            f"(ratchet allows +{ratchet['allowed_delta_mib']})"
+        )
+
+    # --- forbidden processes ------------------------------------------------
+    for pname, detail in measurements[-1].get("forbidden_running", {}).items():
+        print(f"perf: {pname} is RUNNING and must not be")
+        failures.append(
+            f"{pname} is running at idle.\n  {FORBIDDEN_AT_IDLE[pname]}\n"
             f"  guest said: {detail}"
         )
     if not measurements[-1].get("forbidden_running"):
         print(f"perf: none of {sorted(FORBIDDEN_AT_IDLE)} are running (as required)")
 
-    checks = {
-        "idle_ram_mib": (
-            "idle RAM",
-            ram,
-            " MiB",
-            {"gate": ram_gate, "target": ram_target, "conditions": ram_name},
-        ),
-        "boot_seconds": ("boot time", boot, "s", BUDGETS["boot_seconds"]),
-    }
-    for key, (label, measured, unit, budget) in checks.items():
-        ok, message = _verdict(key, measured, unit, budget)
-        print(f"perf: {label} {'ok' if ok else 'OVER GATE'} — {message}")
-        results[f"{key}_within_gate"] = ok
-        if not ok and (only is None or only == key):
-            failures.append(f"{label}: {message}")
-
-    # --- ADR-018 clause 3: the creep detector -------------------------------
-    ratchet = BUDGETS["userspace_pss"]
-    delta = pss - ratchet["baseline_mib"]
-    results["userspace_pss_delta_mib"] = round(delta, 1)
-    results["userspace_pss_baseline_mib"] = ratchet["baseline_mib"]
-    if delta > ratchet["allowed_delta_mib"]:
-        print(
-            f"perf: userspace PSS {pss:.1f} MiB is {delta:.1f} MiB over the "
-            f"{ratchet['baseline_mib']} MiB baseline"
-        )
-        results["userspace_pss_over"] = True
-        if only is None or only == "userspace_pss":
-            failures.append(
-                f"userspace PSS rose {delta:.1f} MiB over baseline "
-                f"({ratchet['baseline_mib']} MiB), past the "
-                f"{ratchet['allowed_delta_mib']} MiB the ratchet allows.\n"
-                "  This is the creep detector (ADR-018 clause 3), not the absolute\n"
-                "  gate — the absolute gate has enough slack to miss steady growth,\n"
-                "  which is exactly why this exists.\n"
-                f"  If the increase is intended, acknowledge it in the PR body with\n"
-                f"  '{ratchet['acknowledgement_marker']} <reason>' saying what was\n"
-                "  bought for it. Passing this by explaining is allowed; passing it\n"
-                "  silently is not."
-            )
-    else:
-        print(
-            f"perf: userspace PSS {pss:.1f} MiB, {delta:+.1f} vs baseline "
-            f"(ratchet allows +{ratchet['allowed_delta_mib']})"
-        )
-        results["userspace_pss_over"] = False
+    # --- boot time ----------------------------------------------------------
+    ok, message = _verdict("boot_seconds", boot, "s", BUDGETS["boot_seconds"])
+    print(f"perf: boot time {'ok' if ok else 'OVER GATE'} — {message}")
+    results["boot_seconds_within_gate"] = ok
+    if not ok and (only is None or only == "boot_seconds"):
+        failures.append(f"boot time: {message}")
 
     vm.write_report(f"perf-budgets-{vm.arch}", results)
     if failures:

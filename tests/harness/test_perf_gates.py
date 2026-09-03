@@ -19,6 +19,7 @@ only exercised by the nightly VM job, a broken gate ships for a day.
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -30,8 +31,8 @@ from harness.suites.perf import (
     _duration_seconds,
     _parse_systemd_analyze,
     _verdict,
-    idle_ram_budget,
     median,
+    steady_budget,
 )
 
 # Real shapes. systemd omits stages that did not happen (no firmware line on
@@ -100,12 +101,19 @@ def main() -> int:
         print("  ok    unparseable output yields no number (the suite then raises)")
 
     print("\nverdicts — a gate must fail above it and pass below it")
-    budgets_under_test = [("boot_seconds", "s", BUDGETS["boot_seconds"])]
-    for software in (True, False):
-        _gate, _target, _name = idle_ram_budget(software)
-        budgets_under_test.append(
-            (_name, " MiB", {"gate": _gate, "target": _target, "conditions": _name})
-        )
+    steady = BUDGETS["steady"]
+    budgets_under_test = [
+        ("boot_seconds", "s", BUDGETS["boot_seconds"]),
+        (
+            "steady",
+            " MiB",
+            {
+                "gate": steady["gate_mib"],
+                "target": steady["target_mib"],
+                "conditions": "steady.product",
+            },
+        ),
+    ]
     for key, unit, budget in budgets_under_test:
         gate, target = budget["gate"], budget["target"]
         for measured, want_ok, label in (
@@ -119,77 +127,120 @@ def main() -> int:
                 print(f"  FAIL  {key} {label}: {measured} -> ok={ok}, wanted {want_ok}")
                 failures += 1
             elif not ok and "escalate" not in message:
-                print(
-                    f"  FAIL  {key} {label}: failure message does not say to escalate"
-                )
+                print(f"  FAIL  {key} {label}: message does not say to escalate")
                 failures += 1
             else:
                 print(f"  ok    {key} {label} ({measured}{unit})")
 
-    # Budgets must match PRD 2. A gate that drifts from the document it
-    # implements is worse than no gate: it looks authoritative.
-    # --- ADR-017: the two names, and the offset's provenance ----------------
-    print("\nADR-017 — idle RAM has two names because it is two numbers")
-    idle = BUDGETS["idle_ram"]
-    product_gate = idle["product"]["gate_mib"]
-    offset = idle["render_offset"]
-    ci_gate, ci_target, ci_name = idle_ram_budget(software_rendering=True)
-    pr_gate, _pr_target, pr_name = idle_ram_budget(software_rendering=False)
+    # --- ADR-018 §1: the protocol -------------------------------------------
+    print("\nADR-018 — the median of 3, because one noisy run is a coin flip")
+    for values, want, why in [
+        ([1123.1, 1122.4, 1174.1], 1123.1, "a real marginal set medians to its middle"),
+        ([10.0, 1.0, 5.0], 5.0, "unsorted input is sorted first"),
+        ([2.0, 4.0], 3.0, "an even count averages the middle pair"),
+        ([7.0], 7.0, "a single run is its own median"),
+    ]:
+        got = median(values)
+        ok = abs(got - want) < 0.001
+        print(f"  {'ok  ' if ok else 'FAIL'}  {why} ({values} -> {got})")
+        failures += 0 if ok else 1
 
+    proto = BUDGETS["protocol"]
     for ok, why in [
-        (pr_name == "ram.idle.product", "a GPU-rendered run gates on ram.idle.product"),
-        (ci_name == "ram.idle.ci", "a software-rendered run gates on ram.idle.ci"),
-        (pr_gate == product_gate, "the product gate is the PRD 1.5 number"),
+        (proto["runs"] == 3, "3 runs"),
+        (proto["statistic"] == "median", "median"),
+        (proto["settle_seconds"] == 120, "the 2-minute settle is preserved"),
+        (proto.get("shmem_window_seconds") == 60, "shmem gets a 60 s window"),
+    ]:
+        print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
+        failures += 0 if ok else 1
+
+    # --- ADR-020 §1: the numbers must re-derive from their provenance -------
+    print("\nADR-020 — every gate re-derives from the runs it was set from")
+
+    def round_up_25(value: float) -> int:
+        return int(math.ceil(value / 25.0) * 25)
+
+    prov = steady["floor_provenance"]
+    med, spr = prov["median_mib"], prov["spread_mib"]
+    shmem = BUDGETS["shmem"]
+    for ok, why in [
         (
-            ci_gate == product_gate + offset["value_mib"],
-            "the CI gate is product + offset, computed",
+            round_up_25(med + 2 * spr) == steady["gate_mib"],
+            f"steady gate {steady['gate_mib']} = round_up_25(median + 2*spread)",
         ),
         (
-            ci_target == idle["product"]["target_mib"] + offset["value_mib"],
-            "the CI target is offset the same way",
+            round_up_25(med + spr) == steady["target_mib"],
+            f"steady target {steady['target_mib']} = round_up_25(median + spread)",
         ),
         (
-            pr_gate < ci_gate,
+            round_up_25(2 * max(shmem["observed_runs_mib"])) == shmem["ceiling_mib"],
+            f"shmem ceiling {shmem['ceiling_mib']} = round_up_25(2 x observed max)",
+        ),
+        (
+            "Shmem" not in steady["components"],
             (
-                "the product gate is the stricter of the two, so a GPU run is "
-                "never judged by the tripwire"
+                "Shmem is NOT in steady — its 64.4 MiB spread WAS the whole "
+                "variance that made the combined statistic fail its trigger"
+            ),
+        ),
+        (
+            steady["gate_mib"] - med >= 3 * spr,
+            (
+                "the gate has several times its own noise as headroom — the "
+                "property 1126, 1200 and the committed denomination all lacked"
             ),
         ),
     ]:
         print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
         failures += 0 if ok else 1
 
-    # The CI gate must appear nowhere as a literal (ADR-017 clause 2): it is
-    # computed so that moving it means editing the offset's provenance record and
-    # saying what was re-measured. This test computes the string rather than
-    # spelling it, so the test file does not itself contain the number it forbids.
-    budgets_raw = (ROOT / "tests" / "perf" / "budgets.json").read_text()
-    for value, label in ((ci_gate, "CI gate"), (ci_target, "CI target")):
-        if str(value) in budgets_raw:
-            print(f"  FAIL  the {label} appears as a literal in budgets.json.")
-            print("      ADR-017 clause 2 requires it computed from product +")
-            print("      offset, so it cannot move without the provenance moving.")
+    # --- ADR-020 §3: an offset may not be carried across denominations ------
+    offset = BUDGETS["render_offset"]
+    if offset["value_mib"] is None:
+        gate, _t, name = steady_budget(software_rendering=True)
+        ok = gate is None and "not yet measured" in name
+        print(
+            f"  {'ok  ' if ok else 'FAIL'}  with no steady-denominated offset, a "
+            "software-rendered run reports without gating"
+        )
+        failures += 0 if ok else 1
+    else:
+        gate, _t, name = steady_budget(software_rendering=True)
+        ok = gate == steady["gate_mib"] + offset["value_mib"]
+        print(
+            f"  {'ok  ' if ok else 'FAIL'}  the CI gate is product + offset, computed"
+        )
+        failures += 0 if ok else 1
+        raw = (ROOT / "tests" / "perf" / "budgets.json").read_text()
+        if str(gate) in raw:
+            print("  FAIL  the CI gate appears as a literal in budgets.json")
             failures += 1
         else:
-            print(f"  ok    the {label} is computed, not stored")
+            print("  ok    the CI gate is computed, not stored")
 
-    # An offset without provenance is a fudge factor: clause 3 lets it change
-    # only to a newly measured pair, which nobody can verify without this.
-    missing = [
-        k
-        for k in ("value_mib", "method", "build_id", "plasma", "mesa", "date")
-        if not offset.get(k)
-    ]
-    if missing:
-        print(f"  FAIL  render_offset is missing provenance: {missing}")
-        failures += 1
-    else:
-        print(f"  ok    render_offset carries full provenance ({offset['date']})")
+    # --- ADR-018 §3: the ratchet is the SENSITIVE one -----------------------
+    print("\nADR-018 — the ratchet must be tighter than the gate's slack")
+    ratchet = BUDGETS["userspace_pss"]
+    slack = steady["gate_mib"] - med
+    for ok, why in [
+        (ratchet["allowed_delta_mib"] == 25, "the ratchet allows +25 MiB"),
+        (bool(ratchet.get("acknowledgement_marker")), "there is an ack marker"),
+        (
+            ratchet["allowed_delta_mib"] < slack,
+            (
+                "the ratchet is tighter than the gate's slack, or it detects "
+                "nothing the gate would not already catch"
+            ),
+        ),
+    ]:
+        print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
+        failures += 0 if ok else 1
 
+    # --- the PRD must name what is gated ------------------------------------
     prd = (ROOT / "docs" / "PRD.md").read_text()
     for needle, why in (
-        ("ram.idle.product", "PRD 1.5 must name the product budget"),
-        ("ram.idle.ci", "PRD 1.5 must name the CI tripwire"),
+        ("steady", "PRD 1.5 must name the steady instrument"),
         ("≤ 15 s", "the boot time gate"),
     ):
         if needle not in prd:
@@ -197,12 +248,6 @@ def main() -> int:
             failures += 1
         else:
             print(f"  ok    PRD states {needle!r}")
-    if product_gate != 1200 or BUDGETS["boot_seconds"]["gate"] != 15:
-        print("  FAIL  budgets.json does not match the PRD (1200 MiB, 15 s).")
-        print("      R-E: budgets are laws. Changing one needs an ADR, not an edit.")
-        failures += 1
-    else:
-        print("  ok    budgets.json matches the PRD")
 
     # run.py writes the per-run verdict as "<suite>-<arch>.json". A suite that
     # writes its own report under that same name is overwritten by the runner,
@@ -220,80 +265,6 @@ def main() -> int:
     print("  ok    no suite writes under the runner's report name")
 
     # --- ADR-018 clause 1: the protocol ------------------------------------
-    print("\nADR-018 — the median of 3, because one noisy run is a coin flip")
-    # The real 2026-09-03 values. Two of the three pass the OLD 1126 gate and one
-    # does not, which is exactly the case the protocol exists to make legible.
-    observed = [1123.1, 1122.4, 1174.1]
-    for values, want, why in [
-        (observed, 1123.1, "the real marginal result medians to its middle value"),
-        ([10.0, 1.0, 5.0], 5.0, "unsorted input is sorted first"),
-        ([2.0, 4.0], 3.0, "an even count averages the middle pair"),
-        ([7.0], 7.0, "a single run is its own median"),
-    ]:
-        got = median(values)
-        ok = abs(got - want) < 0.001
-        print(f"  {'ok  ' if ok else 'FAIL'}  {why} ({values} -> {got})")
-        failures += 0 if ok else 1
-
-    proto = BUDGETS["protocol"]
-    for ok, why in [
-        (proto["runs"] == 3, "the protocol is 3 runs (ADR-018 clause 1)"),
-        (proto["statistic"] == "median", "the statistic is the median"),
-        (proto["settle_seconds"] == 120, "the 2-minute settle is preserved"),
-    ]:
-        print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
-        failures += 0 if ok else 1
-
-    # --- ADR-018 clause 2: the budget re-set, and its provenance -------------
-    print("\nADR-018 — an absolute budget is only as good as its floor evidence")
-    product = BUDGETS["idle_ram"]["product"]
-    floor = product.get("floor_provenance", {})
-    for ok, why in [
-        (product["gate_mib"] == 1200, "the gate is 1200 MiB"),
-        (product["target_mib"] == 1100, "the target is 1100 MiB"),
-        (
-            product.get("aspiration_mib") == 950,
-            "950 survives as an ASPIRATION, not a gate (clause 2)",
-        ),
-        (
-            floor.get("measured_runs_mib") == observed,
-            "the floor cites the runs it was derived from",
-        ),
-        (
-            product["gate_mib"] > max(observed),
-            (
-                "the gate clears the worst observed run — otherwise it is "
-                "still a coin flip"
-            ),
-        ),
-        (
-            product["gate_mib"] - floor.get("mean_mib", 0)
-            >= floor.get("noise_spread_mib", 0) * 0.9,
-            "headroom is about one observed noise-spread (clause 2's basis)",
-        ),
-    ]:
-        print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
-        failures += 0 if ok else 1
-
-    # --- ADR-018 clause 3: the creep detector -------------------------------
-    print("\nADR-018 — the relative ratchet is the creep detector")
-    ratchet = BUDGETS.get("userspace_pss", {})
-    slack = product["gate_mib"] - floor.get("mean_mib", 0)
-    for ok, why in [
-        (ratchet.get("allowed_delta_mib") == 25, "the ratchet allows +25 MiB"),
-        (ratchet.get("baseline_mib") == 576, "the post-trim baseline is recorded"),
-        (bool(ratchet.get("acknowledgement_marker")), "there is an ack marker"),
-        (
-            ratchet.get("allowed_delta_mib", 0) < slack,
-            (
-                "the ratchet is TIGHTER than the absolute gate's slack — "
-                "otherwise it detects nothing the gate would not already catch"
-            ),
-        ),
-    ]:
-        print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
-        failures += 0 if ok else 1
-
     print()
     if failures:
         print(f"perf-gates: {failures} failure(s)")

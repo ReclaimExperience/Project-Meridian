@@ -80,9 +80,10 @@ Meridian OS is built for exactly this person. Not for gamers (Bazzite exists), n
 | Unattended-install success on the reference hardware matrix | ≥ 95% of attempts | Section 10.2 matrix runs |
 | Zero-Terminal story pass rate | 23/23 stories | Section 10.1 in CI + manual |
 | "Parent test": non-technical human completes the 10-task script unaided | ≥ 9/10 tasks, ≥ 4/5 testers | Moderated sessions, M5 |
-| **`ram.idle.product`** — idle RAM after login, GPU-rendered, **median of 3 runs** (2-min settle each) | ≤ 1200 MiB (target 1100; 950 is an *aspiration*, gating nothing — ADR-018 §2) | `tests/perf/idle_ram.sh` on the 10.2 low-end row (ADR-017, ADR-018) |
-| **`ram.idle.ci`** — the same, measured on the llvmpipe CI VM | `ram.idle.product` + `render_offset` — computed, never stored (today: 1386.5 MiB) | `tests/perf/idle_ram.sh` in CI — a **tripwire**, not a release claim (ADR-017) |
-| **Userspace PSS ratchet** — summed userspace PSS vs a rolling baseline | ≤ +25 MiB over the median of the last 10 main-branch nightlies, unless acknowledged in the PR with a reason | The **creep detector** (ADR-018 §3): the absolute gate has slack by construction and cannot see steady growth |
+| **`steady`** — AnonPages + SUnreclaim + KernelStack + PageTables, GPU-rendered, **median of 3 full boots** (2-min settle each) | ≤ 800 MiB (target 775) | `tests/perf/idle_ram.sh` on the 10.2 low-end row (ADR-020 §1a). Process and kernel memory: stable to ~9 MiB, so the gate means something |
+| **`shmem` ceiling** — shared memory, sampled as the **minimum over a 60 s post-settle window** | ≤ 250 MiB | A tripwire against a buffer-pool regression, not a budget (ADR-020 §1b). Loose on purpose: twice the largest figure ever observed |
+| **Userspace PSS ratchet** — summed userspace PSS vs a rolling baseline | ≤ +25 MiB over the median of the last 10 main-branch nightlies, unless acknowledged in the PR with a reason | The **creep detector** (ADR-018 §3), and on the evidence the steadiest thing we measure |
+| *(informational, gates nothing)* `MemTotal − MemAvailable` and total committed | — | Recorded per run. Kept because `MemTotal − MemAvailable` is what `free` prints, so it is the number a user quotes back to us even though it is not the number in the gate |
 | Cold boot, power-on → login screen (virtio SSD VM) | ≤ 15 s (target 10 s) | `tests/perf/boot_time.sh` in CI |
 | Login → usable desktop | ≤ 5 s | same harness |
 | ISO size | ≤ 3.5 GiB (target 3.0) | CI artifact check |
