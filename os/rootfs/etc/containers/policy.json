@@ -1,32 +1,31 @@
 {
   "_comment": [
     "ADR-014: images are cosign-signed in CI and clients enforce the signature.",
-    "This is the client half \u2014 without it the signing is theatre, because nothing",
-    "checks it.",
+    "This is one half of the client side. The other half is",
+    "registries.d/meridian.yaml \u2014 WITHOUT IT THIS RULE REJECTS EVERYTHING,",
+    "because containers-image never fetches the signature to check.",
     "",
-    "ADR-022 chose KEYLESS signing (GitHub OIDC / Sigstore) so that no long-lived",
-    "private key would exist. Its VERIFY established that the client cannot",
-    "express it: containers-common 0.67.0's `fulcio` stanza supports only",
-    "oidcIssuer, subjectEmail, caPath and caData, and GitHub Actions OIDC",
-    "certificates carry the workflow identity in a URI SAN with no email SAN. So",
-    "ADR-022's pre-authorized fallback is in force: a cosign key pair, public key",
-    "here, private key in a GitHub Environment secret with required reviewers.",
-    "Re-run ci/verify-signing-policy.sh after a containers-image update \u2014 if an",
-    "identity field appears, keyless becomes possible and the key should be",
-    "retired, because the reason to prefer it has not gone away.",
+    "ADR-023: the trust anchor must be RECOVERABLE, so this trusts a SET of",
+    "keys, not one. A fleet that enforces exactly one key is unrecoverable if",
+    "that key is lost or leaked: you cannot sign the image that would introduce",
+    "its replacement. For an auto-updating OS that is a permanent fleet-wide loss",
+    "of the update path \u2014 worse than a bad update, which rolls back.",
     "",
-    "PRD WP-04 specifies usr/etc/containers/policy.json. That path cannot be",
-    "built: `bootc container lint` rejects /usr/etc, which WP-01 already hit.",
+    "`keyPaths` (plural) is the mechanism. NOTE FOR ANYONE EDITING THIS: two",
+    "sigstoreSigned requirements side by side in this array would NOT mean 'either",
+    "key'. Multiple requirements in a scope are ANDed \u2014 verified empirically \u2014",
+    "so that shape demands BOTH signatures and breaks the rotation overlap",
+    "instead of providing it.",
     "",
-    "THE DEFAULT IS PERMISSIVE AND THAT IS A DEVELOPMENT STATE, NOT A CHOICE.",
-    "ADR-022: it is `:testing`-only. The signing key does not exist yet, and a",
-    "policy that rejects everything makes an unbootable machine rather than a",
-    "secure one. Two things must both be true before this tightens:",
-    "  1. the key exists and CI signs with it;",
-    "  2. the NEGATIVE TEST passes \u2014 an unsigned or wrong-key image is REFUSED,",
-    "     demonstrated on a booted machine, not asserted here.",
-    "Until (2), enforcement is unproven whatever this file says, and 'negative",
-    "test green' is a hard gate on the first :stable image (promote gate 7.5)."
+    "INCOMPLETE: the recovery key is not here yet. Its private half must be",
+    "generated offline and kept in cold storage, never in CI or any secret",
+    "store, so only the owner can produce it. ADR-023 makes adding it a",
+    "WP-04 deliverable that GATES THE FIRST :stable IMAGE. Until then this",
+    "fleet has one key and is not recoverable.",
+    "",
+    "THE DEFAULT IS PERMISSIVE AND THAT IS A DEVELOPMENT STATE (ADR-022):",
+    ":testing-only, until the key exists, CI signs with it, and the NEGATIVE",
+    "TEST demonstrates that an unsigned image is REFUSED on a real machine."
   ],
   "default": [
     {
@@ -38,7 +37,9 @@
       "ghcr.io/reclaimexperience/project-meridian": [
         {
           "type": "sigstoreSigned",
-          "keyPath": "/etc/pki/containers/meridian.pub",
+          "keyPaths": [
+            "/etc/pki/containers/meridian.pub"
+          ],
           "signedIdentity": {
             "type": "matchRepository"
           }

@@ -122,6 +122,45 @@ precisely what an attacker moves.
    verify was made before that update existed.
 5. Run the negative test.
 
+### Two keys, because one key is a single point of no return (ADR-023)
+
+`policy.json` trusts a **set**: the **primary** (CI, human-gated) and a
+**recovery** key whose private half lives **offline, in cold storage, never in CI
+or any secret store**.
+
+The reason is narrow and worth stating plainly: a fleet that enforces exactly one
+key **cannot be rescued if that key is lost or leaked**, because the image that
+would introduce a replacement key must itself be signed by a key the fleet already
+trusts. A backup does not help with compromise — a leaked key stays leaked. Only a
+distinct, trusted-but-unused key does.
+
+**A bad update rolls back and you ship a fix. A lost key means you cannot ship the
+fix.**
+
+> **Currently outstanding.** The recovery key does not exist yet, so the fleet
+> trusts one key and is **not recoverable**. Generating it and adding its public
+> half **gates the first `:stable` image**. It cannot be done by CI or by an
+> agent: a key reachable by either is not a recovery key, it is a second primary.
+
+#### Introducing or rotating a trusted key — the order matters
+
+1. Add the new **public** key to `policy.json`.
+2. Build and sign that image **with an already-trusted key**.
+3. **Wait for the fleet to adopt it.** Only now do machines trust the new key.
+4. Only then may the new key sign anything.
+
+Doing 4 before 3 publishes an image that no machine trusts — and the fix for that
+would itself need to be signed by the key they do not have. `sign-image.sh`
+verifies its own signature against the shipped public key, which catches a
+mismatched pair; it cannot catch this ordering mistake, which is why the protocol
+is written down rather than left to care.
+
+#### Do not write two requirements instead of one
+
+Use `keyPaths` with several keys in **one** `sigstoreSigned` requirement. Multiple
+requirements in a scope are **ANDed** — verified empirically — so two side by side
+demand **both** signatures and break every rotation instead of smoothing it.
+
 ### The negative test is the gate
 
 `ci/negative-test-signing.sh` asserts three things, in order: that the policy
@@ -138,8 +177,22 @@ its positive cases alone is not a gate.
 promote gate 7.5). Until then the permissive default in `policy.json` is an
 honest description of a development state, not a lapse.
 
-**Still unverified:** whether `bootc upgrade` honours `policy.json` at all. That
-needs a booted machine and applies equally to keyless or key-pair signing.
+**Still unverified, and all three gate the first `:stable`:**
+
+1. Whether `bootc upgrade` honours `policy.json` at all. Needs a booted machine.
+2. Whether `keyPaths` accepts an image signed by **any one** listed key, or
+   requires **all** of them. If it means all, ADR-023's rotation overlap does not
+   exist and the protocol above needs redesigning.
+3. **A cosign/containers-image version mismatch.** cosign v3.1.3 wrote its
+   signature to a tag named `sha256-<hex>`; containers-image looks for
+   `sha256-<hex>.sig`. If that reproduces in CI, images we sign **will not verify
+   on the machines that receive them**, and it would present as "signing is
+   broken everywhere" rather than as a version problem. Pin a cosign version whose
+   output containers-image reads, and assert it.
+
+`registries.d/meridian.yaml` is the other half of the client side. Without it the
+policy rejects every image, because containers-image never fetches the signature
+to check — found the hard way while verifying ADR-023.
 
 ## Channels and promotion (PRD §7.5, §7.6)
 

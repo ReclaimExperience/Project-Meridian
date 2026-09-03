@@ -1,0 +1,15 @@
+# Look for cosign/sigstore signatures on our images (ADR-014, ADR-022, ADR-023).
+#
+# WITHOUT THIS FILE, policy.json's sigstoreSigned rule REJECTS EVERYTHING.
+# containers-image does not fetch sigstore attachments unless a registries.d
+# entry opts in, so a client with our policy and without this config never looks
+# for the signature, finds none, and refuses the image. That is fail-closed, but
+# it would present as "signing is broken" on every machine at once.
+#
+# Established empirically while verifying ADR-023: a correctly signed image was
+# rejected with "A signature was required, but no signature exists" until this
+# was set. The policy file alone is not the client half of signing — this is the
+# other half of it.
+docker:
+  ghcr.io:
+    use-sigstore-attachments: true
