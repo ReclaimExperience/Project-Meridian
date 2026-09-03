@@ -708,13 +708,31 @@ Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
 
 **NOT done — WP-02 is not DONE until these land:**
 
-- **Idle RAM is 1448.2 MiB against the 1126 MiB gate — over by 322 MiB.**
-  Escalated as issue #32, not hidden and not accommodated by moving the budget
-  (R-E). Boot time passes at 11.0 s (gate 15 s). Baloo is masked, Akonadi is
-  gone and `systemctl --failed` is empty, so this is what the base costs rather
-  than a runaway. **Where it goes is not yet known**: the per-process and
-  per-cgroup breakdown is committed and captured on every run, but no run has
-  produced it — see the CI blocker below.
+- **Idle RAM is over the gate, but by 116 MiB, not ~300.** Measured both ways on
+  the same image: **1242 MiB with a GPU** (`MERIDIAN_VM_GL=1`, virgl) vs ~1424 MiB
+  mean with software rendering. The 182 MiB difference is llvmpipe's tile buffers,
+  which no machine with a working GPU driver allocates — 155 MiB of it inside
+  plasmashell alone. Escalated as issue #32 with the full evidence; the budget has
+  NOT been edited (R-E). The remaining 116 MiB cannot be found without giving up
+  a capability: the only candidates big enough are the on-screen keyboard
+  (72 MiB PSS) and Wayland→X11 screen sharing for Zoom/Discord (29 MiB), and both
+  together still miss. The open question is whether PRD 2's budget means idle RAM
+  on Pat's machine or in our test VM — they differ by 182 MiB and share a name.
+- **Two leads that looked obvious and were wrong**, both closed by measurement:
+  the enabled-but-pointless system services (`sssd`, `systemd-homed`, `mdmonitor`,
+  mandb…) do not appear in the top 20 at all; and `plasma-keyboard`, second by RSS
+  at 256 MiB, freed **−5.6 MiB** when killed and respawned immediately, because
+  that RSS is shared Qt pages. **RSS is not a savings list** — the perf suite now
+  reports PSS alongside it so the next person does not repeat this.
+- **Baloo was running despite ADR-016 and is now genuinely off.** Masking
+  `baloo_file.service` was cosmetic: the XDG autostart entry starts it regardless,
+  gated on a key that defaults to true when unset. `/etc/xdg/baloofilerc` fixes it,
+  the perf suite fails if it is running, and the fix is **verified** on a rebuild.
+- **Boot time passes; earlier failures were cold host cache.** Same image: 16.9 s
+  cold, **7.8 s** warm — inside the 10 s target. Worth knowing before a 14 s
+  reading is treated as a regression.
+- Idle-RAM run-to-run variance is ~±25 MiB, larger than the 28 MiB Baloo saved.
+- **OLD, superseded:** idle RAM 1448.2 MiB / over by 322 MiB.
 - **CI is producing no workflow runs at all.** Since 21:39 on 2026-09-02, four
   pushes and a deliberate empty commit created zero runs — not cancelled, never
   created. Actions reports enabled, no concurrency guard, no path filters;
