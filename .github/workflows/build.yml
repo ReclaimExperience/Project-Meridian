@@ -158,15 +158,31 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       - name: Install skopeo
         run: sudo apt-get install -y -qq skopeo
+      # ONE auth file that BOTH tools read, which is the whole point.
+      #
+      # cosign does not use the containers auth file. It resolves credentials
+      # through go-containerregistry's keychain — $DOCKER_CONFIG/config.json or
+      # ~/.docker/config.json — so `skopeo login` alone left cosign pushing
+      # anonymously, and the signature upload failed with UNAUTHORIZED after the
+      # signing itself had already succeeded.
+      #
+      # Writing skopeo's login into the docker config path gives cosign the
+      # credentials it looks for, and REGISTRY_AUTH_FILE points skopeo at the
+      # same file for the digest lookup and the negative test.
       - name: Log in to GHCR
         run: |
-          echo '${{ secrets.GITHUB_TOKEN }}' | skopeo login ghcr.io -u '${{ github.actor }}' --password-stdin
+          set -euo pipefail
+          mkdir -p "${HOME}/.docker"
+          echo '${{ secrets.GITHUB_TOKEN }}' | skopeo login ghcr.io \
+            -u '${{ github.actor }}' --password-stdin \
+            --authfile "${HOME}/.docker/config.json"
       - name: Sign the published images
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
           set -euo pipefail
+          export REGISTRY_AUTH_FILE="${HOME}/.docker/config.json"
           image="$(python3 -c "import json;d=json.load(open('os/rootfs/usr/share/meridian/branding.json'));print(d['registry']['namespace']+'/'+d['registry']['image'])")"
           for arch in x86_64 aarch64; do
             bash ci/sign-image.sh "${image}:testing-${arch}"
@@ -186,4 +202,9 @@ jobs:
       # namespace — which is what proves the RULE, as opposed to an out-of-scope
       # image, which only exercises the control.
       - name: Negative test — unsigned images must be refused
-        run: bash ci/negative-test-signing.sh
+        run: |
+          set -euo pipefail
+          # skopeo reads the same file cosign was given, so the two tools cannot
+          # disagree about whether we are logged in.
+          export REGISTRY_AUTH_FILE="${HOME}/.docker/config.json"
+          bash ci/negative-test-signing.sh
