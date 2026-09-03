@@ -1,0 +1,10 @@
+[Unit]
+Description=Twice-daily Flatpak update check (ADR-008)
+
+[Timer]
+OnCalendar=*-*-* 06,18:00:00
+RandomizedDelaySec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

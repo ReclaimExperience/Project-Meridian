@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Stage an OS update in the background (ADR-008). NEVER reboots.
+#
+# ADR-008 is explicit: download and STAGE, finalize on the next natural
+# reboot — "no forced restarts, no 'Updating… 30%' hostage screens, ever". That
+# is the single most-hated Windows behaviour and eliminating it is a headline
+# feature, so there is no reboot in this file and none may be added. WP-04's
+# Forbidden list names auto-reboot logic specifically.
+#
+# `bootc upgrade` stages by default and does not reboot. It is written here
+# WITHOUT --apply for that reason, and the absence is deliberate rather than an
+# omission — --apply would reboot.
+set -euo pipefail
+
+log() { echo "meridian-os-update: $*"; }
+
+# Metered connections: someone on a phone hotspot should not discover a
+# multi-gigabyte OS image on their bill. NetworkManager reports 1 and 3 for
+# "metered" (explicit and guessed); 2 and 4 are not-metered, 0 is unknown.
+if command -v nmcli >/dev/null 2>&1; then
+    metered="$(nmcli -t -f GENERAL.METERED general 2>/dev/null | cut -d: -f2 || true)"
+    case "${metered:-}" in
+        yes|yes\ \(guessed\))
+            log "connection is metered — skipping. Not spending someone's data"
+            log "allowance on a background download they did not ask for."
+            exec /usr/libexec/meridian/publish-update-status
+            ;;
+    esac
+fi
+
+if ! command -v bootc >/dev/null 2>&1; then
+    log "bootc is not installed; nothing to do"
+    exec /usr/libexec/meridian/publish-update-status error
+fi
+
+log "staging any available update (no reboot — ADR-008)"
+if bootc upgrade --quiet; then
+    log "check complete"
+    exec /usr/libexec/meridian/publish-update-status
+fi
+
+# A failed check is not a failed system. Publish the state so Settings can say
+# something true, and exit 0 so the timer does not enter a failed state and stop
+# trying — a machine that silently stops checking for updates is the worst
+# outcome available here.
+log "update check failed; recording it and continuing"
+/usr/libexec/meridian/publish-update-status error || true
+exit 0

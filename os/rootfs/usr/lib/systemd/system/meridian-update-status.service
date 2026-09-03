@@ -1,0 +1,16 @@
+[Unit]
+Description=Publish update status for Settings (contract 8.0)
+Documentation=file:///usr/share/doc/meridian/updates.md
+# On EVERY boot, not only after an update check. /run is a tmpfs, so the file
+# does not survive a reboot — and the boot after a rollback is exactly when
+# Settings most needs something true to show.
+After=local-fs.target
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/meridian/publish-update-status
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Update Flatpak applications (ADR-008)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flatpak update --system --noninteractive --assumeyes
+Nice=10
+IOSchedulingClass=idle
+# Flathub being unreachable is not a system fault.
+SuccessExitStatus=0 1
