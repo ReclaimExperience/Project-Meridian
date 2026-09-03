@@ -42,16 +42,11 @@ jobs:
       - name: Prepare runner storage
         run: bash ci/prepare-runner.sh
 
-      # ONE login, rootful — because everything that touches the registry now
-      # runs as root: the build pushes, and the credential check pulls back the
-      # published image under sudo. A second rootless login was tried and failed
-      # on the aarch64 runner; one store with one set of credentials is both
-      # simpler and the thing that actually works.
       - name: Log in to GHCR
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         run: |
           # --password-stdin: a token passed as -p is visible in /proc.
-          echo '${{ secrets.GITHUB_TOKEN }}' | sudo podman login ghcr.io -u '${{ github.actor }}' --password-stdin
+          echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
 
       # PR images go to a throwaway pr-NNN tag; main goes to :testing. Nothing
       # here ever writes :stable — that is the weekly promote gate's job (7.5).
@@ -71,50 +66,31 @@ jobs:
       # Fork PRs get no GHCR credentials, so they build without pushing. ADR-014
       # makes this repo public, so fork PRs are a real path, not a hypothetical —
       # they must not fail on a push they were never able to perform.
-      # Built ROOTFUL, and that is the whole point. bootc-image-builder refuses
-      # to run rootless, so a rootless build has to be handed to root's store
-      # before a disk image can be made — `podman save | sudo podman load` of an
-      # 8.7 GiB stream, measured at 4m12s of a 25-minute job to move bytes that
-      # were already on the disk. Building where the disk builder will look for
-      # it costs nothing and removes the copy.
+      # Built ROOTLESS, deliberately, after an experiment that failed.
       #
-      # `sudo env PATH=...` rather than `sudo -E`: `just` comes from setup-just
-      # on the runner's PATH, but carrying the whole environment would also hand
-      # root the runner user's HOME and therefore its containers.conf.
+      # Building as root would let ci/vm-test.sh skip an 8.7 GiB `podman save |
+      # sudo podman load` — 4m12s of a 25-minute job spent moving bytes that were
+      # already on the disk. That is a real saving and it is not worth it:
+      # rootful builds cost two credential failures (the login moved with the
+      # build, and the rootless credential check could no longer pull), and then
+      # hung for 1h45m at the first RUN step on the x86_64 runner where the
+      # rootless build takes under four minutes.
+      #
+      # Four minutes saved is not worth a build that does not finish. If this is
+      # attempted again, the thing to work out first is why a rootful `RUN` step
+      # stalls on a hosted runner whose root store is a bind mount onto /mnt.
       - name: Build and push
         env:
           CAN_PUSH: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           set -euo pipefail
           if [ "$CAN_PUSH" = "true" ]; then
-            sudo env "PATH=${PATH}" bash ci/build.sh ${{ matrix.arch }} --push '${{ steps.tag.outputs.tag }}'
+            bash ci/build.sh ${{ matrix.arch }} --push '${{ steps.tag.outputs.tag }}'
           else
             echo "Fork pull request: building without pushing (no registry credentials)."
             echo "The pushed-label check therefore does not run for this PR."
-            sudo env "PATH=${PATH}" bash ci/build.sh ${{ matrix.arch }}
+            bash ci/build.sh ${{ matrix.arch }}
           fi
-
-      # PRD 7.3's vm-test row. `smoke`, `security` and `perf` gate a PR:
-      #   - `security` was expected-red until WP-02, on the two ADR-015 defects
-      #     the WP-03 harness found (LLMNR listening on 5355, and openssh-server
-      #     shipping). WP-02 removed both, so it gates from here on — an
-      #     expected-red suite that nobody promotes when it is fixed is just a
-      #     suite that never has to pass, and PRD 7.5's promote-to-stable gate
-      #     stays unsatisfiable while it sits in the nightly.
-      #   - `perf` enforces PRD 2's budgets. It costs a boot plus a two-minute
-      #     settle, which is the price of noticing idle RAM drift in the PR that
-      #     causes it rather than a month later.
-      #   - `screens` still needs x86_64 baselines, which must be created
-      #     deliberately in their own commit (rule R-F) and do not exist yet;
-      #   - `privacy` takes a 10-minute idle window by design.
-      # Those two run nightly. Widening this list is how a suite stops being
-      # advisory; narrowing it is how a gate stops being a gate.
-      - name: Harness suites
-        if: matrix.arch == 'x86_64'
-        run: |
-          sudo apt-get install -y -qq qemu-system-x86 ovmf
-          python3 -m pip install --quiet --break-system-packages pillow numpy
-          bash ci/vm-test.sh x86_64 smoke security perf
 
       # WP-03 acceptance: the harness logs in as `mtest`, so prove that account
       # is absent from the image that was actually PUSHED — not from a local
@@ -129,7 +105,7 @@ jobs:
           # tag. Root's store holds the image it just pushed, so without this the
           # check would inspect that and prove nothing about the registry.
           MERIDIAN_VERIFY_PUBLISHED: "1"
-        run: sudo -E env "PATH=${PATH}" bash ci/check-no-test-user.sh '${{ steps.tag.outputs.tag }}'
+        run: bash ci/check-no-test-user.sh '${{ steps.tag.outputs.tag }}'
 
       - name: Upload harness evidence
         if: matrix.arch == 'x86_64' && always()

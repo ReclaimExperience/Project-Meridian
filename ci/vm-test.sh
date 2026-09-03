@@ -51,14 +51,14 @@ echo "::endgroup::"
 
 echo "::group::disk image"
 # bootc-image-builder refuses to run rootless, so the image has to be in ROOT's
-# store before a disk can be made. CI now builds rootful for exactly this reason
-# and the image is already there — but check rather than assume, because the
-# fallback (an 8.7 GiB `podman save | sudo podman load`, 4m12s when it was
-# unconditional) is also the only thing that works if a caller built rootless.
+# store before a disk can be made. CI builds rootless, so this transfer is the
+# normal path: an 8.7 GiB `podman save | sudo podman load`, about 4m12s.
 #
-# Assuming instead of checking would turn a rootless build into "image not
-# known", which surfaces four minutes later as a bootc-image-builder error about
-# a manifest rather than as "the image is in the wrong store".
+# Building rootful to avoid it was tried and reverted — it cost two credential
+# failures and then a 1h45m hang at the first RUN step. The check below stays
+# because it is cheap and correct either way: assuming the store would turn a
+# rootful build into "image not known", surfacing four minutes later as a
+# bootc-image-builder manifest error rather than "it is in the wrong store".
 BRANDING=os/rootfs/usr/share/meridian/branding.json
 IMAGE="$(python3 -c "import json;d=json.load(open('${BRANDING}'));print(d['registry']['namespace']+'/'+d['registry']['image'])")"
 LOCAL_REF="${IMAGE}:testing-${ARCH}"
