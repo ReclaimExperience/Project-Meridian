@@ -127,6 +127,31 @@ def steady_budget(software_rendering: bool) -> tuple[float | None, float | None,
     return steady["gate_mib"] + offset, steady["target_mib"] + offset, "steady.ci"
 
 
+def pss_ratchet(software_rendering: bool) -> tuple[float, float, str, bool]:
+    """The ratchet's baseline, threshold, name, and whether it GATES this run.
+
+    ADR-021: the ratchet is a CI/llvmpipe instrument, measured directly in its own
+    denomination — no offset, unlike `steady`. The asymmetry is deliberate.
+    steady's canonical value is the GPU/product number, so its CI gate must
+    translate forever; the ratchet's canonical value IS the CI history, so it
+    translates once at bootstrap and then stops needing to.
+
+    A GPU run therefore reports against the GPU reference and **does not gate**
+    (ADR-021 §3): there are no per-PR GPU runs, and cross-comparing the two
+    denominations is the exact error this ADR exists to undo — 576 was GPU-measured
+    and fired at +179 on every healthy PR because llvmpipe's software-render cost
+    is anonymous memory PSS counts.
+    """
+    ratchet = BUDGETS["userspace_pss"]
+    threshold = ratchet["allowed_delta_mib"]
+    if not software_rendering:
+        return ratchet["gpu_reference_mib"], threshold, "pss.gpu-reference", False
+    rolling = ratchet.get("rolling_baseline_mib")
+    if rolling is not None:
+        return rolling, threshold, "pss.ci (rolling median)", True
+    return ratchet["interim_seed_mib"], threshold, "pss.ci (interim seed)", True
+
+
 def _verdict(
     name: str, measured: float, unit: str, budget: dict | None = None
 ) -> tuple[bool, str]:
@@ -513,17 +538,30 @@ def apply_gates(measurements: list[dict], vm: VM, only: str | None = None) -> No
             "ceiling"
         )
 
-    # --- 1c. the ratchet ----------------------------------------------------
+    # --- 1c. the ratchet (ADR-018 §3, re-denominated by ADR-021) ------------
     ratchet = BUDGETS["userspace_pss"]
-    delta = pss - ratchet["baseline_mib"]
+    baseline, threshold, ratchet_name, ratchet_gates = pss_ratchet(software)
+    delta = pss - baseline
+    results["userspace_pss_baseline_mib"] = baseline
     results["userspace_pss_delta_mib"] = round(delta, 1)
-    if delta > ratchet["allowed_delta_mib"]:
+    results["userspace_pss_instrument"] = ratchet_name
+    results["userspace_pss_gated"] = ratchet_gates
+
+    if not ratchet_gates:
+        # Informational only. Reporting the delta is still useful — it is the
+        # M-gate pairing check (ADR-021 §4) — but a GPU number judged against a
+        # CI baseline, or vice versa, is meaningless in either direction.
+        print(
+            f"perf: userspace PSS {pss:.1f} MiB, {delta:+.1f} vs the GPU reference "
+            f"({baseline}) — informational, {ratchet_name} does not gate (ADR-021 §3)"
+        )
+        results["userspace_pss_over"] = None
+    elif delta > threshold:
         results["userspace_pss_over"] = True
-        print(f"perf: userspace PSS {pss:.1f} MiB, {delta:+.1f} over baseline")
+        print(f"perf: userspace PSS {pss:.1f} MiB, {delta:+.1f} over {ratchet_name}")
         failures.append(
-            f"userspace PSS rose {delta:.1f} MiB over baseline "
-            f"({ratchet['baseline_mib']} MiB), past the "
-            f"{ratchet['allowed_delta_mib']} MiB the ratchet allows.\n"
+            f"userspace PSS rose {delta:.1f} MiB over the {ratchet_name} baseline "
+            f"({baseline} MiB), past the {threshold} MiB the ratchet allows.\n"
             "  This is the creep detector (ADR-018 §3): the absolute gate has\n"
             "  slack by construction and cannot see steady growth.\n"
             f"  If intended, acknowledge it in the PR body with\n"
@@ -533,8 +571,8 @@ def apply_gates(measurements: list[dict], vm: VM, only: str | None = None) -> No
     else:
         results["userspace_pss_over"] = False
         print(
-            f"perf: userspace PSS {pss:.1f} MiB, {delta:+.1f} vs baseline "
-            f"(ratchet allows +{ratchet['allowed_delta_mib']})"
+            f"perf: userspace PSS {pss:.1f} MiB, {delta:+.1f} vs {ratchet_name} "
+            f"baseline {baseline} (allows +{threshold})"
         )
 
     # --- forbidden processes ------------------------------------------------

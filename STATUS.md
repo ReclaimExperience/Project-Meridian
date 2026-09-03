@@ -732,6 +732,17 @@ Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
   stored. A **relative ratchet** on summed userspace PSS (baseline 576, +25 MiB)
   is now the creep detector, because a gate slack enough not to be a coin flip is
   slack enough to hide steady growth.
+- **ADR-021 (2026-09-03): the PSS ratchet is CI-denominated.** ADR-018 §3 seeded
+  it at 576, which was **GPU-measured**, while the ratchet runs on CI's llvmpipe —
+  where a healthy build reads **755.3**, so it fired at **+179 on every PR**. Same
+  one-renderer-baseline / other-renderer-measurement error ADR-017 fixed for idle
+  RAM, one instrument over, and it would have blocked every merge.
+  Interim seed is now 755.3 (llvmpipe, paired with GPU 574.0, provenance
+  recorded), retiring into a rolling median of 10 CI nightlies. **No offset** —
+  deliberately asymmetric with `steady`, whose CI gate stays a computed sum
+  forever because its canonical value is the GPU number; the ratchet's canonical
+  value *is* the CI history, so it translates once and then stops. GPU PSS is
+  informational and never cross-compared.
 - **IDLE-RAM ACCEPTANCE: MET (2026-09-03, ADR-020 §2).** Fresh median-of-3 on a
   new build, GPU-rendered, under ADR-020's instruments:
 

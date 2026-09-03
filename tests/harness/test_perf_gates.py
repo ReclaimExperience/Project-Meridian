@@ -32,6 +32,7 @@ from harness.suites.perf import (
     _parse_systemd_analyze,
     _verdict,
     median,
+    pss_ratchet,
     steady_budget,
 )
 
@@ -219,15 +220,49 @@ def main() -> int:
         else:
             print("  ok    the CI gate is computed, not stored")
 
-    # --- ADR-018 §3: the ratchet is the SENSITIVE one -----------------------
-    print("\nADR-018 — the ratchet must be tighter than the gate's slack")
+    # --- ADR-018 §3 + ADR-021: the ratchet, in its own denomination ---------
+    print("\nADR-021 — the ratchet is a CI instrument, measured in CI's terms")
     ratchet = BUDGETS["userspace_pss"]
     slack = steady["gate_mib"] - med
+    ci_base, ci_thresh, _ci_name, ci_gates = pss_ratchet(software_rendering=True)
+    _gpu_base, _gt, _gpu_name, gpu_gates = pss_ratchet(software_rendering=False)
+
+    # The measured pair that motivated ADR-021. A healthy llvmpipe build read
+    # 755.3 and the GPU-seeded baseline of 576 called that +179 of creep.
+    MEASURED_LLVMPIPE, MEASURED_GPU = 755.3, 574.0
     for ok, why in [
-        (ratchet["allowed_delta_mib"] == 25, "the ratchet allows +25 MiB"),
+        (ci_gates, "a CI/llvmpipe run gates on the ratchet"),
+        (not gpu_gates, "a GPU run does NOT gate on it (ADR-021 §3)"),
+        (
+            ratchet["denomination"].startswith("llvmpipe"),
+            "the baseline is llvmpipe-denominated",
+        ),
+        (
+            abs(MEASURED_LLVMPIPE - ci_base) <= ci_thresh,
+            (
+                "a healthy llvmpipe build sits INSIDE the ratchet — the whole "
+                "point: it read +179 over the old GPU-seeded 576"
+            ),
+        ),
+        (
+            MEASURED_GPU - ci_base < 0,
+            (
+                "the GPU figure is nowhere near the CI baseline, which is why "
+                "cross-comparing them was meaningless in both directions"
+            ),
+        ),
+        (
+            ratchet.get("rolling_window_runs") == 10,
+            "the seed retires into a rolling median of 10 CI runs (ADR-021 §1)",
+        ),
+        (
+            "value_mib" not in str(ratchet.get("seed_provenance", {}).keys()),
+            "no render offset is stored on the ratchet — it is measured directly",
+        ),
+        (ci_thresh == 25, "the threshold is unchanged at +25 MiB (ADR-021 §2)"),
         (bool(ratchet.get("acknowledgement_marker")), "there is an ack marker"),
         (
-            ratchet["allowed_delta_mib"] < slack,
+            ci_thresh < slack,
             (
                 "the ratchet is tighter than the gate's slack, or it detects "
                 "nothing the gate would not already catch"
@@ -236,6 +271,13 @@ def main() -> int:
     ]:
         print(f"  {'ok  ' if ok else 'FAIL'}  {why}")
         failures += 0 if ok else 1
+
+    # ADR-021 §1: a seed with no arranged retirement is a permanent constant.
+    if ratchet.get("rolling_baseline_mib") is None and not ratchet.get(
+        "rolling_window_runs"
+    ):
+        print("  FAIL  an interim seed with no rolling window to replace it")
+        failures += 1
 
     # --- the PRD must name what is gated ------------------------------------
     prd = (ROOT / "docs" / "PRD.md").read_text()
