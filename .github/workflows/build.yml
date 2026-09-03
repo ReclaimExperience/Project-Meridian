@@ -92,6 +92,22 @@ jobs:
             bash ci/build.sh ${{ matrix.arch }}
           fi
 
+      # ADR-022's VERIFY, re-run on every build rather than trusted once.
+      # It answers "can the client policy pin a keyless identity?" against the
+      # containers-image actually present. The answer today is no, which put the
+      # key-pair fallback in force; if a containers-image update changes it we
+      # find out here instead of carrying a stale decision indefinitely.
+      # Informational — it never fails the build, it reports.
+      - name: ADR-022 signing-policy capability
+        if: matrix.arch == 'x86_64'
+        run: |
+          sudo apt-get install -y -qq skopeo >/dev/null 2>&1 || true
+          if command -v skopeo >/dev/null 2>&1; then
+            bash ci/verify-signing-policy.sh || true
+          else
+            echo "::notice::skopeo unavailable; ADR-022 capability check skipped"
+          fi
+
       # WP-03 acceptance: the harness logs in as `mtest`, so prove that account
       # is absent from the image that was actually PUSHED — not from a local
       # build of it.

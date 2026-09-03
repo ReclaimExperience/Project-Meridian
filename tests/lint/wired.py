@@ -54,6 +54,7 @@ CI_SCRIPTS = {
     "ci/vm-test.sh": "build",
     "ci/check-no-test-user.sh": "build",
     "ci/prepare-runner.sh": "build",
+    "ci/verify-signing-policy.sh": "build",
 }
 
 # Job names branch protection requires on `main`. Kept here so a rename shows up

@@ -1,29 +1,47 @@
 {
   "_comment": [
     "ADR-014: images are cosign-signed in CI and clients enforce the signature.",
-    "This is the client half — without it the signing is theatre, because nothing",
+    "This is the client half \u2014 without it the signing is theatre, because nothing",
     "checks it.",
     "",
-    "PRD WP-04 specifies usr/etc/containers/policy.json. It cannot live there:",
-    "`bootc container lint` rejects /usr/etc outright, which WP-01 already hit and",
-    "recorded. /etc is the shipped location and bootc treats it as the machine's",
-    "own, so this file is also the one an offline-ISO install path must be able to",
-    "amend (WP-17 coordination, per WP-04's Escalate-if).",
+    "ADR-022 chose KEYLESS signing (GitHub OIDC / Sigstore) so that no long-lived",
+    "private key would exist. Its VERIFY established that the client cannot",
+    "express it: containers-common 0.67.0's `fulcio` stanza supports only",
+    "oidcIssuer, subjectEmail, caPath and caData, and GitHub Actions OIDC",
+    "certificates carry the workflow identity in a URI SAN with no email SAN. So",
+    "ADR-022's pre-authorized fallback is in force: a cosign key pair, public key",
+    "here, private key in a GitHub Environment secret with required reviewers.",
+    "Re-run ci/verify-signing-policy.sh after a containers-image update \u2014 if an",
+    "identity field appears, keyless becomes possible and the key should be",
+    "retired, because the reason to prefer it has not gone away.",
     "",
-    "The default is insecureAcceptAnything rather than reject: this ships BEFORE",
-    "the key exists, and a policy that rejects everything makes an unbootable",
-    "machine, not a secure one. The scoped rule below is the real gate, and the",
-    "default tightens once WP-04's signing is live and proven by the negative",
-    "test (an unsigned image MUST be refused)."
+    "PRD WP-04 specifies usr/etc/containers/policy.json. That path cannot be",
+    "built: `bootc container lint` rejects /usr/etc, which WP-01 already hit.",
+    "",
+    "THE DEFAULT IS PERMISSIVE AND THAT IS A DEVELOPMENT STATE, NOT A CHOICE.",
+    "ADR-022: it is `:testing`-only. The signing key does not exist yet, and a",
+    "policy that rejects everything makes an unbootable machine rather than a",
+    "secure one. Two things must both be true before this tightens:",
+    "  1. the key exists and CI signs with it;",
+    "  2. the NEGATIVE TEST passes \u2014 an unsigned or wrong-key image is REFUSED,",
+    "     demonstrated on a booted machine, not asserted here.",
+    "Until (2), enforcement is unproven whatever this file says, and 'negative",
+    "test green' is a hard gate on the first :stable image (promote gate 7.5)."
   ],
-  "default": [{ "type": "insecureAcceptAnything" }],
+  "default": [
+    {
+      "type": "insecureAcceptAnything"
+    }
+  ],
   "transports": {
     "docker": {
       "ghcr.io/reclaimexperience/project-meridian": [
         {
           "type": "sigstoreSigned",
           "keyPath": "/etc/pki/containers/meridian.pub",
-          "signedIdentity": { "type": "matchRepository" }
+          "signedIdentity": {
+            "type": "matchRepository"
+          }
         }
       ]
     }
