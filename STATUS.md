@@ -731,6 +731,24 @@ Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
   stored. A **relative ratchet** on summed userspace PSS (baseline 576, +25 MiB)
   is now the creep detector, because a gate slack enough not to be a coin flip is
   slack enough to hide steady growth.
+- **First ADR-018 median-of-3 (2026-09-03, post-rework): 1126.1 / 1199.2 / 1201.5,
+  median 1199.2 against the 1200 gate.** Passes by **0.8 MiB**, with one run over
+  the gate and a spread of **75.4 MiB** — wider than the 51.7 MiB spread the
+  gate's headroom was derived from. **Acceptance is NOT recorded as MET**: clause
+  7's letter is satisfied, but a 0.8 MiB margin on a metric with 75 MiB of noise
+  is not evidence of conformance, and claiming it would be the "green or honest"
+  failure (R-A) in its most tempting form. Referred back to the owner.
+  The three runs were **structurally identical** — same processes, plasmashell
+  348 MiB PSS in each, OSK absent in all three, summed userspace PSS varying by
+  1.7 MiB. What moved was `user.slice`'s charged memory, i.e. page cache that
+  `MemAvailable` declines to call reclaimable. **The absolute metric is noisy and
+  the relative one is stable — the reverse of clause 3's assumption**, which is
+  now instrumented (anon/cached/slab/pagetables recorded per run) so the next
+  measurement settles it rather than arguing it. Likely a clause 4 floor-vs-gate
+  review item.
+- **The OSK rework is verified working and kept the saving.** OSK absent across
+  all three boots; userspace PSS 574.4 vs the 576 baseline (−1.6, ratchet allows
+  +25). So session scope removed the greeter risk without costing the trim.
 - **The OSK trim was reworked because the shipped one was unsafe.** It wrote
   `/etc/xdg/kwinrc`, a system-wide default the greeter's own kwin also reads, so a
   late-detected digitizer could have suppressed the keyboard at the **login
