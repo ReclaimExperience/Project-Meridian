@@ -40,6 +40,23 @@ BUDGETS = json.loads(
 
 SETTLE_SECONDS = 120
 
+# Processes an ADR says must not be running once the desktop is idle, and why.
+# This belongs to the perf suite because "is it running" and "what does idle
+# cost" are the same question: every one of these was disabled for a resource
+# reason, and a disable that did not take is invisible until someone measures.
+#
+# baloo_file is here because masking baloo_file.service did NOT stop it. It is
+# started by /etc/xdg/autostart/baloo_file.desktop, whose condition defaults to
+# true when unset, so the mask was recorded as satisfying ADR-016 while the
+# indexer ran anyway — found at 28.4 MiB in the first real measurement.
+FORBIDDEN_AT_IDLE = {
+    "baloo_file": (
+        "ADR-016 disables Baloo. Masking baloo_file.service is not sufficient: "
+        "the XDG autostart entry starts it regardless unless "
+        "/etc/xdg/baloofilerc sets Indexing-Enabled=false."
+    ),
+}
+
 
 def _parse_systemd_analyze(text: str) -> dict[str, float]:
     """Pull the component times out of `systemd-analyze time`.
@@ -152,6 +169,12 @@ def measure(vm: VM, credentials: dict) -> dict:
     print(f"perf: settling for {SETTLE_SECONDS}s before measuring idle RAM")
     time.sleep(SETTLE_SECONDS)
 
+    forbidden_running = {}
+    for name in FORBIDDEN_AT_IDLE:
+        _status, found = console.run(f"pgrep -a {name} || true", timeout=30)
+        if name in found:
+            forbidden_running[name] = found.strip()
+
     _status, meminfo = console.run(
         "grep -E '^(MemTotal|MemAvailable|MemFree):' /proc/meminfo", timeout=60
     )
@@ -203,6 +226,7 @@ def measure(vm: VM, credentials: dict) -> dict:
         "wall_clock_to_console_seconds": round(wall_clock_to_console, 2),
         "settle_seconds": SETTLE_SECONDS,
         "systemd_analyze_raw": analyze.strip(),
+        "forbidden_running": forbidden_running,
         "top_processes_mib": top[:20],
         "cgroup_slices_mib": slices,
     }
@@ -230,6 +254,15 @@ def run(vm: VM, credentials: dict, only: str | None = None) -> None:
         print(f"perf:   {entry['mib']:>7.1f} MiB  {entry['comm']}")
 
     failures = []
+    for name, detail in results.get("forbidden_running", {}).items():
+        print(f"perf: {name} is RUNNING and must not be")
+        failures.append(
+            f"{name} is running at idle.\n  {FORBIDDEN_AT_IDLE[name]}\n"
+            f"  guest said: {detail}"
+        )
+    if not results.get("forbidden_running"):
+        print(f"perf: none of {sorted(FORBIDDEN_AT_IDLE)} are running (as required)")
+
     for key, (label, measured, unit) in checks.items():
         ok, message = _verdict(key, measured, unit)
         print(f"perf: {label} {'ok' if ok else 'OVER GATE'} — {message}")
