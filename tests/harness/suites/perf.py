@@ -216,6 +216,20 @@ def measure(vm: VM, credentials: dict) -> dict:
     _status, by_process = console.run(
         "ps -eo rss=,comm= --sort=-rss | head -20", timeout=60
     )
+    # PSS, because RSS is not a savings list and reading it as one is how an
+    # afternoon gets spent. plasma-keyboard was second by RSS at 256 MiB;
+    # killing it in a live session freed -5.6 MiB, because almost all of that
+    # was shared Qt/QML pages plasmashell and kwin map too. PSS divides each
+    # shared page among its mappers, so these figures approximately SUM to what
+    # is actually in use — which makes them the ones worth acting on.
+    _status, by_pss = console.run(
+        "for f in /proc/[0-9]*/smaps_rollup; do "
+        "p=${f%/smaps_rollup}; "
+        "v=$(awk '/^Pss:/{print $2; exit}' \"$f\" 2>/dev/null); "
+        '[ -n "$v" ] && echo "$v $(cat ${p}/comm 2>/dev/null)"; '
+        "done | sort -rn | head -20",
+        timeout=120,
+    )
     _status, by_slice = console.run(
         "for s in user.slice system.slice init.scope; do "
         "printf '%s %s\\n' \"$s\" "
@@ -229,6 +243,14 @@ def measure(vm: VM, credentials: dict) -> dict:
             top.append(
                 {"mib": round(int(parts[0]) / 1024, 1), "comm": parts[1].strip()}
             )
+    pss = []
+    for line in by_pss.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            pss.append(
+                {"mib": round(int(parts[0]) / 1024, 1), "comm": parts[1].strip()}
+            )
+
     slices = {}
     for line in by_slice.splitlines():
         parts = line.split()
@@ -247,6 +269,8 @@ def measure(vm: VM, credentials: dict) -> dict:
         "renderer_probe": renderer.strip(),
         "software_rendering": software_rendering,
         "top_processes_mib": top[:20],
+        "top_processes_pss_mib": pss[:20],
+        "pss_total_visible_mib": round(sum(e["mib"] for e in pss), 1),
         "cgroup_slices_mib": slices,
     }
 
@@ -275,8 +299,18 @@ def run(vm: VM, credentials: dict, only: str | None = None) -> None:
         )
     if results.get("cgroup_slices_mib"):
         print(f"perf: by slice {results['cgroup_slices_mib']}")
-    for entry in results.get("top_processes_mib", [])[:12]:
-        print(f"perf:   {entry['mib']:>7.1f} MiB  {entry['comm']}")
+    if results.get("top_processes_pss_mib"):
+        print("perf: by PSS (shared pages divided among mappers; these ~sum):")
+        for entry in results["top_processes_pss_mib"][:12]:
+            print(f"perf:   {entry['mib']:>7.1f} MiB  {entry['comm']}")
+        print(
+            f"perf:   {results['pss_total_visible_mib']:>7.1f} MiB  "
+            "= total of the processes visible to this user"
+        )
+    else:
+        print("perf: PSS unavailable; RSS below OVERSTATES per-process cost")
+        for entry in results.get("top_processes_mib", [])[:12]:
+            print(f"perf:   {entry['mib']:>7.1f} MiB  {entry['comm']} (RSS)")
 
     failures = []
     for name, detail in results.get("forbidden_running", {}).items():
