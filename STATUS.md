@@ -58,7 +58,8 @@ Status: `TODO` | `IN PROGRESS` | `BLOCKED` | `DONE` | `WAIVED`
 
 ## Zero-Terminal story coverage (PRD 10.1 — the INV-0 gate)
 
-0 / 22 green. No harness yet (WP-03). Every story is currently unproven.
+0 / 23 green. The harness exists (WP-03); no story is implemented yet, so every
+one is unproven. ZT-23 (on-screen keyboard, pointer-only) was added by ADR-019 §7.
 
 ---
 

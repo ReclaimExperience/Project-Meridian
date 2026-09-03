@@ -1,9 +1,9 @@
 """Runs the Zero-Terminal stories (PRD 10.1) — the INV-0 enforcement checklist.
 
 Discovers every `tests/stories/zt_*.py`, runs each in turn against one booted
-image, and reports coverage against the 22 stories the PRD defines.
+image, and reports coverage against the 23 stories the PRD defines.
 
-Coverage short of 22 is expected for most of the project and is NOT a failure:
+Coverage short of 23 is expected for most of the project and is NOT a failure:
 each story lands with the work package that ships its flow. What IS a failure is
 a story that exists and does not pass.
 """
@@ -17,7 +17,7 @@ from pathlib import Path
 from harness.vm import ROOT, VM
 
 STORIES = ROOT / "tests" / "stories"
-TOTAL_STORIES = 22  # PRD 10.1
+TOTAL_STORIES = 23  # PRD 10.1 (ZT-23 added by ADR-019 §7)
 
 
 def discover() -> list[Path]:
