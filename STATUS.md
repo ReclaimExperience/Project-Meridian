@@ -883,6 +883,50 @@ bootc+greenboot path. Left alone deliberately — WP-04 owns the update pipeline
 and should decide, rather than WP-02 changing update behaviour as a side effect
 of de-bloating.
 
+## WP-04 in progress — update mechanism and signing (2026-09-03)
+
+**Delivered (PR 1):** `meridian-os-update.{service,timer}` (daily, randomized,
+metered-aware, **stage only — never reboots**, ADR-008), flatpak timer,
+`meridian-maintenance.target`; greenboot health checks + rollback marker; the
+PRD 8.0 status contract as a committed JSON Schema with a contract test driving
+the real publisher through all five states; cosign signing behind the `release`
+environment's required reviewers; the negative test; `docs/updates.md`.
+
+**PRD deviations, recorded not worked around:** the greenboot check asks about
+`display-manager.service`, not `sddm` — Fedora 44 ships plasmalogin, so checking
+`sddm` would roll back every good update forever. `policy.json` lives in `/etc`,
+not `/usr/etc`, which `bootc container lint` rejects (WP-01 hit this too).
+
+**ADR-022 (keyless signing): VERIFY says the client cannot express it.**
+`fulcio` supports only `oidcIssuer`, `subjectEmail`, `caPath`, `caData`; GitHub
+Actions OIDC carries the workflow identity in a URI SAN with no email SAN. The
+pre-authorized key-pair fallback is in force. `ci/verify-signing-policy.sh` re-asks
+this on every build — if an identity field ever appears, **retire the key**.
+
+**ADR-023 (recoverable trust anchor):** `policy.json` trusts a key *set* via
+`keyPaths`. Its stated fallback — parallel policy requirements — **would not work**:
+requirements in a scope are ANDed (verified), so two side by side demand *both*
+signatures and break every rotation. The recovery key is **not generated**; it
+gates the first `:stable` and is deliberately not custodied earlier.
+
+**Found while verifying: we were shipping only half the client side.** A correctly
+signed image is REJECTED until `registries.d` sets `use-sigstore-attachments`.
+Without it the policy rejects every image on every machine at once, and it would
+present as "signing is broken" rather than a missing config. Now shipped.
+
+**UNPROVEN, and all gate the first `:stable`:**
+
+- whether `bootc upgrade` honours `policy.json` at all (needs a booted machine);
+- whether `keyPaths` means ANY or ALL — if ALL, ADR-023's rotation overlap does
+  not exist;
+- **the live one:** cosign v3.1.3 writes `sha256-<hex>`, containers-image looks for
+  `sha256-<hex>.sig`. If that reproduces in CI, images we sign will not verify on
+  the machines receiving them. The negative test is what surfaces it.
+
+**Nothing is signed yet.** The `sign` job has never run — it lands with this PR.
+
+---
+
 ## WP-03 closed — 2026-09-02
 
 All four acceptance items met. The last needed the merge itself:
