@@ -27,6 +27,19 @@ command -v cosign >/dev/null 2>&1 || {
     exit 2
 }
 
+# Check we can WRITE before we sign. cosign signs first and pushes second, so an
+# auth problem surfaces after a Rekor transparency-log entry has already been
+# created for a signature that never lands — a public record of a thing that did
+# not happen. The first run failed exactly that way: `skopeo login` writes the
+# containers auth file, cosign reads go-containerregistry's (~/.docker/config.json),
+# so cosign was pushing anonymously.
+if [[ -n "${REGISTRY_AUTH_FILE:-}" && ! -s "${REGISTRY_AUTH_FILE}" ]]; then
+    echo "sign-image: REGISTRY_AUTH_FILE is set to '${REGISTRY_AUTH_FILE}' but that" >&2
+    echo "            file is empty or missing. Refusing to sign: the signature" >&2
+    echo "            push would fail after the transparency log had recorded it." >&2
+    exit 1
+fi
+
 echo "sign-image: resolving ${REF} to a digest"
 digest="$(skopeo inspect --format '{{.Digest}}' "docker://${REF}" 2>/dev/null)" || {
     echo "sign-image: could not resolve ${REF}. Refusing to sign a name I cannot" >&2
