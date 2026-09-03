@@ -732,7 +732,25 @@ Schibsted Grotesk is unpackaged in Fedora; **WP-05 must bundle it**.
   stored. A **relative ratchet** on summed userspace PSS (baseline 576, +25 MiB)
   is now the creep detector, because a gate slack enough not to be a coin flip is
   slack enough to hide steady growth.
-- **First ADR-018 median-of-3 (2026-09-03, post-rework): 1126.1 / 1199.2 / 1201.5,
+- **ADR-019 §0 trigger FAILED (2026-09-03). Nothing adopted; escalated per the
+  clause.** committed spread **59.2 MiB > 25 MiB threshold**, so the cache account
+  I proposed is **wrong** — cache does vary (50.9) but is not where the metric's
+  variance lives. The failure is single-source: **Shmem** moves 117.8/55.3/53.4
+  (spread 64.4) while AnonPages holds ±9.3, SUnreclaim ±0.4, KernelStack ±0.1,
+  PageTables ±0.3. Committed's spread *is* Shmem's spread.
+  This is **not** "something real breathing ±75 MiB": process memory is stable and
+  nothing is leaking. Shmem on Wayland is largely `wl_shm` graphics buffers —
+  genuinely committed (unreclaimable without swap) but a transient pool sized by
+  what was on screen at sampling. `committed − Shmem` has a spread of **9.3 MiB**,
+  well inside the threshold; that observation is recorded for the owner and
+  **deliberately not acted on**, because "the statistic fails its own trigger but
+  would pass if we drop the failing term" needs a decision, not an agent.
+  Open: run 1's 117.8 MiB was one outlier, not a spread — first-boot behaviour, an
+  unsettled buffer pool, or bimodality needs more samples (S-size).
+  ADR-018's current gate is unaffected and comfortably met this time: median
+  1144.3 vs 1200, headroom 55.7 MiB — after 0.8 MiB last time, which is its own
+  argument against treating one median-of-3 as a verdict.
+- **Superseded by the above — first ADR-018 median-of-3 (2026-09-03, post-rework): 1126.1 / 1199.2 / 1201.5,
   median 1199.2 against the 1200 gate.** Passes by **0.8 MiB**, with one run over
   the gate and a spread of **75.4 MiB** — wider than the 51.7 MiB spread the
   gate's headroom was derived from. **Acceptance is NOT recorded as MET**: clause
