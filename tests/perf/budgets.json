@@ -77,10 +77,18 @@
     ]
   },
   "render_offset": {
-    "value_mib": null,
+    "value_mib": 188.2,
     "denomination": "steady",
-    "status": "NOT YET MEASURED in the steady denomination. ADR-020 §3 requires one paired GPU/llvmpipe run. The previous 186.5 was denominated in MemTotal-MemAvailable and retires with it; carrying it across denominations would be a fabricated constant.",
-    "supersedes": "186.5 MiB (old metric), 182 MiB (old metric, pre-trim)"
+    "method": "ADR-020 §3 paired run, same build: llvmpipe steady median 948.1 (941.7/948.1/952.6) minus GPU steady median 759.9 (763.8/757.4/759.9)",
+    "build_id": "31032e44b327eac8",
+    "plasma": "6.7.4-2.fc44",
+    "mesa": "26.1.4-4.fc44",
+    "kernel": "7.1.12-200.fc44",
+    "date": "2026-09-03",
+    "measured_by": "WP-02, issue #32; adopted under ADR-020 §3",
+    "supersedes": "186.5 MiB and 182 MiB, both denominated in MemTotal-MemAvailable and retired with it",
+    "note": "Landing within 1.7 MiB of the old-metric 186.5 is a coincidence of two different denominations, not a confirmation. It is only evidence that llvmpipe's cost is mostly anonymous memory, which both statistics count.",
+    "recalibrate": "at every M-gate (ADR-017 §3); >25% drift is a finding, not an update"
   },
   "informational": {
     "idle_ram_mib": "MemTotal - MemAvailable. Recorded per run, gates nothing (ADR-020 §1). What `free` shows.",
