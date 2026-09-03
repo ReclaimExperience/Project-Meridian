@@ -1,0 +1,14 @@
+[Unit]
+Description=Stage an OS update (ADR-008: stage only, never reboot)
+Documentation=file:///usr/share/doc/meridian/updates.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/run/ostree-booted
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/meridian/os-update
+# Background work must stay out of the way of whatever the person is doing.
+Nice=10
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle

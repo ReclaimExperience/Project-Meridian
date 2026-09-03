@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Publish /run/meridian/update-status.json — contract 8.0, consumed by WP-12.
+#
+# bootc is daemonless and exposes no D-Bus API, so the Updates page cannot ask it
+# anything. This file IS the interface: written on every boot and after every
+# update check, world-readable, and shaped by
+# catalog/schemas/update-status.schema.json so a consumer can rely on it before
+# WP-12 exists.
+#
+# It is written ATOMICALLY (temp file + mv). A Settings page that reads a
+# half-written JSON file shows a parse error to a user who did nothing wrong, and
+# the window for that is exactly as wide as the write.
+set -euo pipefail
+
+OUT=/run/meridian/update-status.json
+ROLLBACK_MARKER=/var/lib/meridian/rollback-happened
+STATE="${1:-}"
+
+mkdir -p "$(dirname "$OUT")"
+
+booted_json='null'
+staged_json='null'
+state="up-to-date"
+
+if command -v bootc >/dev/null 2>&1 && status="$(bootc status --json 2>/dev/null)"; then
+    booted_json="$(printf '%s' "$status" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+b = (d.get("status") or {}).get("booted") or {}
+img = ((b.get("image") or {}).get("image") or {}).get("image")
+print(json.dumps({
+    "image": img,
+    "version": (b.get("image") or {}).get("version"),
+    "date": (b.get("image") or {}).get("timestamp"),
+}))' 2>/dev/null || echo 'null')"
+    staged_json="$(printf '%s' "$status" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+s = (d.get("status") or {}).get("staged")
+if not s:
+    print("null")
+else:
+    print(json.dumps({
+        "image": ((s.get("image") or {}).get("image") or {}).get("image"),
+        "version": (s.get("image") or {}).get("version"),
+        "date": (s.get("image") or {}).get("timestamp"),
+    }))' 2>/dev/null || echo 'null')"
+    [[ "$staged_json" != "null" ]] && state="staged"
+fi
+
+rollback_json='{"happened": false, "date": null}'
+if [[ -r "$ROLLBACK_MARKER" ]]; then
+    rollback_date="$(cat "$ROLLBACK_MARKER" 2>/dev/null || true)"
+    rollback_json="$(python3 -c '
+import json, sys
+print(json.dumps({"happened": True, "date": sys.argv[1] or None}))' "$rollback_date")"
+    state="rolled-back"
+fi
+
+# An explicit state from the caller wins — the update run knows it failed, and
+# the file must not report "up-to-date" just because bootc has nothing staged.
+[[ -n "$STATE" ]] && state="$STATE"
+
+tmp="$(mktemp "${OUT}.XXXXXX")"
+python3 - "$tmp" "$state" "$booted_json" "$staged_json" "$rollback_json" <<'PY'
+import datetime, json, sys
+
+path, state, booted, staged, rollback = sys.argv[1:6]
+def load(text):
+    try:
+        return json.loads(text)
+    except (ValueError, TypeError):
+        return None
+
+document = {
+    "state": state,
+    "booted": load(booted),
+    "staged": load(staged),
+    "rollback": load(rollback),
+    "lastCheck": datetime.datetime.now(datetime.timezone.utc)
+        .isoformat(timespec="seconds").replace("+00:00", "Z"),
+    "flatpakHistory": [],
+    "firmwareOffers": [],
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(document, handle, indent=2)
+    handle.write("\n")
+PY
+chmod 0644 "$tmp"
+mv "$tmp" "$OUT"
+echo "meridian: published ${OUT} (state=${state})"

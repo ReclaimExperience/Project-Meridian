@@ -1,0 +1,9 @@
+[Unit]
+Description=Background maintenance (ADR-008)
+Documentation=file:///usr/share/doc/meridian/updates.md
+# One place to see everything that runs on its own, and one switch to stop it.
+# `systemctl list-dependencies meridian-maintenance.target` answers "what does
+# this machine do when nobody is looking" — a question ADR-011 says a user is
+# entitled to a straight answer to.
+Wants=meridian-os-update.timer meridian-flatpak-update.timer
+After=network-online.target

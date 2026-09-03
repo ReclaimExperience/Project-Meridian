@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "update-status.schema.json",
+  "title": "/run/meridian/update-status.json — PRD 8.0 contract (provider WP-04, consumer WP-12)",
+  "description": "bootc is daemonless and offers no D-Bus API, so this file IS the interface between the update machinery and the Settings Updates page. It is committed as a schema so WP-12 can be built and tested against it before either side is finished, and so a change to the shape is a change someone has to review.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["state", "booted", "staged", "rollback", "lastCheck", "flatpakHistory", "firmwareOffers"],
+  "$defs": {
+    "deployment": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "image": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] },
+        "date": { "type": ["string", "null"] }
+      }
+    }
+  },
+  "properties": {
+    "state": {
+      "enum": ["up-to-date", "staged", "rolled-back", "error"],
+      "description": "The headline. 'rolled-back' outranks the others: a machine that healed itself must say so even if an update is also staged, because that is the one state the user is owed an explanation for."
+    },
+    "booted": { "$ref": "#/$defs/deployment" },
+    "staged": { "$ref": "#/$defs/deployment" },
+    "rollback": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["happened"],
+      "properties": {
+        "happened": { "type": "boolean" },
+        "date": { "type": ["string", "null"] }
+      }
+    },
+    "lastCheck": {
+      "type": "string",
+      "description": "ISO 8601. When the check ran, not when an update was found — 'we looked and there was nothing' is information a user wants."
+    },
+    "flatpakHistory": { "type": "array" },
+    "firmwareOffers": {
+      "type": "array",
+      "description": "OFFERS. ADR-008: firmware is never auto-applied."
+    }
+  }
+}

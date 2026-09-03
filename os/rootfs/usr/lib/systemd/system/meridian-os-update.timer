@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily OS update check (ADR-008)
+Documentation=file:///usr/share/doc/meridian/updates.md
+
+[Timer]
+OnCalendar=daily
+# Randomised across three hours: every machine running this image asking the same
+# registry at midnight is a self-inflicted outage, and ADR-008 puts the update
+# servers on the public registry with zero infrastructure of our own to absorb it.
+RandomizedDelaySec=3h
+# A machine that was off at the scheduled time still gets its update, rather than
+# waiting for the next day. Pat's desktop is not on at 03:00.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
