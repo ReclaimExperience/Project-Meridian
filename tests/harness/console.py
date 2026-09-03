@@ -18,9 +18,24 @@ import time
 from pathlib import Path
 
 # Matches a shell prompt at end of buffer: "[mtest@meridian ~]$ " / "# " / "$ ".
+# A serial console carries the kernel's printk stream as well as getty's
+# prompts, and the kernel does not wait its turn. A real capture:
+#
+#   Password: [   11.139142] clocksource: Watchdog remote CPU 1 read timed out
+#
+# `password:\s*$` did not match that, the login timed out after 30s, and the
+# failure looked like an image that would not accept its own credentials. So the
+# prompt patterns deliberately do NOT anchor to end of line: they allow a
+# bracketed kernel timestamp and whatever follows it.
+#
+# The shell PROMPT still anchors, because that one is matched against output the
+# guest produced in response to a command we sent, and relaxing it would let a
+# `#` anywhere in a command's own output read as "the shell is ready".
+_KERNEL_NOISE = r"(?:\s*\[\s*\d+\.\d+\].*)?$"
+
 PROMPT = re.compile(r"[\$#]\s*$")
-LOGIN_PROMPT = re.compile(r"login:\s*$", re.IGNORECASE)
-PASSWORD_PROMPT = re.compile(r"password:\s*$", re.IGNORECASE)
+LOGIN_PROMPT = re.compile(r"login:\s*" + _KERNEL_NOISE, re.IGNORECASE)
+PASSWORD_PROMPT = re.compile(r"password:\s*" + _KERNEL_NOISE, re.IGNORECASE)
 
 # Escape sequences the shell and systemd emit. OSC must be listed first and
 # must accept BOTH terminators: modern shells emit OSC 3008 session markers

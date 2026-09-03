@@ -147,6 +147,8 @@ test-lint:
     @python3 tests/harness/test_perf_gates.py
     @echo
     @python3 tests/harness/test_screen_presence.py
+    @echo
+    @python3 tests/harness/test_console_prompts.py
 
 # ------------------------------------------------------------------ build ---
 
