@@ -119,5 +119,8 @@ def run(vm: VM, credentials: dict) -> None:
         console.run("pkill kwrite; pkill kdialog; true", timeout=60)
         time.sleep(3)
 
-    vm.write_report(f"theme-{vm.arch}", {"fonts_resolved": resolved.strip()})
+    # NOT "theme-<arch>": run.py writes the per-run verdict under that name and
+    # would replace this. The same collision cost the first over-budget perf run
+    # its whole memory breakdown; the guard that caught it then caught this.
+    vm.write_report(f"theme-capture-{vm.arch}", {"fonts_resolved": resolved.strip()})
     print("theme: all surfaces captured, both themes")

@@ -80,7 +80,7 @@ def build(evidence: Path, mockups: Path, out: Path, note: str = "") -> int:
         draw,
         GAP,
         12,
-        f"Meridian theme compare sheet — ours (left) vs mockup (right){note}",
+        f"Theme compare sheet — ours (left) vs mockup (right){note}",
     )
 
     y = 52
