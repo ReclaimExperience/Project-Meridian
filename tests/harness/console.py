@@ -37,6 +37,20 @@ PROMPT = re.compile(r"[\$#]\s*$")
 LOGIN_PROMPT = re.compile(r"login:\s*" + _KERNEL_NOISE, re.IGNORECASE)
 PASSWORD_PROMPT = re.compile(r"password:\s*" + _KERNEL_NOISE, re.IGNORECASE)
 
+# Before Linux owns the serial console, UEFI and GRUB are reading it. A
+# keystroke sent then is a menu selection, not a nudge: it can stop GRUB's
+# countdown or drop the machine into the firmware's setup application, where
+# every later keystroke is swallowed by a menu that never yields a getty.
+# These two patterns say the console is in firmware hands.
+FIRMWARE_TRAP = re.compile(
+    r'starting Boot0000 "UiApp"'
+    r"|change the language for the current system"
+    r"|Boot Maintenance Manager",
+    re.IGNORECASE,
+)
+# ...and these say userspace has started talking, so nudging is safe.
+USERSPACE = re.compile(r"systemd\[1\]|Reached target|Welcome to |login:", re.IGNORECASE)
+
 # Escape sequences the shell and systemd emit. OSC must be listed first and
 # must accept BOTH terminators: modern shells emit OSC 3008 session markers
 # ending in ST (ESC backslash), not BEL, and a BEL-only pattern leaves the whole
@@ -156,6 +170,32 @@ class Console:
 
     # ----------------------------------------------------------------- login --
 
+    def _refuse_firmware(self) -> None:
+        """Raise if the console is owned by UEFI or the bootloader.
+
+        Checked before every keystroke of the login sequence. Typing on into a
+        firmware menu is what turns a failed boot into a ten-minute silence
+        that reads like a hung getty.
+        """
+        if FIRMWARE_TRAP.search(self._clean()):
+            raise ConsoleError(
+                "the VM is in the UEFI setup application, not booting Linux. "
+                "GRUB handed control back to the firmware, which fell through "
+                "to Boot0000 (UiApp). Nothing typed here reaches a getty."
+            )
+
+    def _await_userspace(self, deadline: float, timeout: float) -> None:
+        """Wait, sending nothing, until Linux is talking on the console."""
+        while time.monotonic() < deadline:
+            self._refuse_firmware()
+            if USERSPACE.search(self._clean()):
+                return
+            time.sleep(1.0)
+        raise ConsoleError(
+            f"no sign of userspace on the console within {timeout:.0f}s — "
+            "the VM never got past the firmware or the bootloader."
+        )
+
     def login(self, user: str, password: str, timeout: float = 300.0) -> None:
         """Log in on the console, tolerating a getty that is not up yet.
 
@@ -164,7 +204,9 @@ class Console:
         scrolled past or may not have been emitted at all.
         """
         deadline = time.monotonic() + timeout
+        self._await_userspace(deadline, timeout)
         while time.monotonic() < deadline:
+            self._refuse_firmware()
             self.send_line()
             try:
                 self.wait_for(LOGIN_PROMPT, timeout=10)

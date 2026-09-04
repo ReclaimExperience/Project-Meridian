@@ -161,6 +161,7 @@ test-lint:
     @python3 tests/harness/test_screen_presence.py
     @echo
     @python3 tests/harness/test_console_prompts.py
+    @python3 tests/harness/test_console_firmware.py
 
 # ------------------------------------------------------------------ build ---
 
