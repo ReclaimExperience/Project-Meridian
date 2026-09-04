@@ -27,6 +27,28 @@ You are one agent executing exactly one work package (or one clearly-named slice
 - **R-F: Baselines change deliberately.** Screenshot re-baselines get their own commit + STATUS note; never bury one to go green (14.5 audits this).
 - **R-G: Upstream respect.** Prefer config > patch > fork(forbidden). Every patch has the 6.2 justification file.
 - **R-H: Security surfaces are owner-gated.** polkit, signing policy, packages.yml removals, ci/, ADRs → CODEOWNERS review, no exceptions, even if CI is green.
+- **R-I: Assert the effect, never the presence.** In an image-based OS almost
+  everything is declarative config, so the signature failure is a thing that is
+  *installed, correct-looking, and doing nothing* — with no surface indicating
+  the gap. Presence proves nothing. Test the observable effect on a running
+  system, and where the effect cannot be reached, say so rather than accepting
+  presence as a proxy.
+
+  Three instances, all found late and all the same shape:
+
+  | Present | Inert because | Would have shipped as |
+  |---|---|---|
+  | `greenboot` installed, health checks written, unit correct | nothing runs `systemctl preset-all`, so `WantedBy=` is dead letter without an enablement symlink | ADR-008's automatic rollback **false on every machine** |
+  | Font chain configured in the right order, in the right file | `alias`/`prefer` is a *weak* fontconfig binding; Fedora's default binds strongly | the **wrong typeface** rendering everywhere, two substitutions deep |
+  | `policy.json` signature rule, proven enforcing under skopeo | `bootc` is a different consumer of the same file | signing verified for a tool **users never run** |
+
+  The tell is always the same: every artifact reads correctly, and nothing in the
+  system reports a gap. `tests/lint/units_enabled.py`, the `fc-match` check, and
+  the negative test exist because a human noticed the difference between
+  configured and in-effect — three times, each time by accident.
+
+  The third row is still open: `bootc upgrade` honouring `policy.json` is
+  unproven, and is recorded as such rather than assumed from the skopeo result.
 
 ### 14.4 Context discipline (you are an Opus 5 medium agent; budget accordingly)
 Load only listed inputs; grep before reading whole files; summarize long tool output into your working notes instead of re-reading; if context tightens, STOP at a clean commit + STATUS.md "Open threads" + hand off rather than degrading quality. An L-size WP expects 5–8 sessions — plan your slice to land something verified each session.

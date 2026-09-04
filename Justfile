@@ -148,6 +148,8 @@ test-lint:
     @echo
     @python3 tests/lint/theme_generated.py
     @echo
+    @python3 tests/lint/font_provenance.py
+    @echo
     @python3 tests/harness/test_pcap.py
     @echo
     @python3 tests/harness/test_suite_guards.py
