@@ -20,6 +20,7 @@ how large the corner art happens to be.
 
 from __future__ import annotations
 
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -38,6 +39,17 @@ FRAME_IDS = {
     "bottom",
     "bottomright",
 }
+# KWin blurs behind the region these define. Translucency without them is
+# translucency over an unblurred background: the alpha is real, the material is
+# not.
+MASK_IDS = {f"mask-{name}" for name in FRAME_IDS}
+# Plasma rewrites this block's contents per colour scheme; elements opt in with
+# class="ColorScheme-*" and fill="currentColor". A hardcoded fill renders
+# exactly as authored and never follows light/dark — which is how the first cut
+# of this style produced a near-white panel under a dark scheme, while
+# `plasma-apply-desktoptheme` reported success.
+STYLESHEET_ID = "current-color-scheme"
+
 HINT_IDS = {
     "hint-top-margin",
     "hint-bottom-margin",
@@ -82,6 +94,35 @@ def main() -> int:
             print(
                 f"{rel}: missing {sorted(missing_hints)} — content padding "
                 "would come from the corner art's size instead of the token."
+            )
+            failures += 1
+        missing_mask = MASK_IDS - present
+        if missing_mask:
+            print(
+                f"{rel}: missing {sorted(missing_mask)[:3]}... — no blur mask, "
+                "so the frame is translucent over an unblurred background."
+            )
+            failures += 1
+
+        text = svg.read_text()
+        if STYLESHEET_ID not in present:
+            print(
+                f'{rel}: no <style id="{STYLESHEET_ID}"> — Plasma has nothing '
+                "to rewrite, so the frame keeps its authored colours and never "
+                "follows the colour scheme."
+            )
+            failures += 1
+        if "ColorScheme-" not in text or 'fill="currentColor"' not in text:
+            print(
+                f'{rel}: paints without class="ColorScheme-*" + '
+                'fill="currentColor", so the stylesheet cannot reach it.'
+            )
+            failures += 1
+        hardcoded = re.findall(r'fill="#[0-9a-fA-F]{6}"', text)
+        if len(hardcoded) > len(MASK_IDS):
+            print(
+                f"{rel}: {len(hardcoded)} hardcoded fill(s); only the mask "
+                "slices may be flat."
             )
             failures += 1
 
