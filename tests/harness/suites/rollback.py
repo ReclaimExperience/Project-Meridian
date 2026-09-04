@@ -35,22 +35,40 @@ from harness.vm import VM
 ROLLBACK_DEADLINE = 900
 
 
-def _booted_image(console) -> str:
-    """The image digest this machine is currently running."""
-    _status, out = console.run(
-        "bootc status --json 2>/dev/null | "
-        'python3 -c "import json,sys;d=json.load(sys.stdin);'
-        "b=(d.get('status') or {}).get('booted') or {};"
-        "i=(b.get('image') or {});"
-        "print((i.get('imageDigest') or i.get('image',{}).get('image') or 'unknown'))\" "
+def _booted_image(console) -> tuple[str, str]:
+    """The image digest this machine is running, and the raw status behind it.
+
+    Returns the raw output too, because "unknown" is the answer that stops the
+    drill and the next question is always "what did bootc actually say?". The
+    first run of this drill returned unknown and the transcript held nothing to
+    explain it — the diagnostic cost more than the fix.
+
+    Uses sudo: `bootc status` reads the deployment state and the harness logs in
+    as an unprivileged user. Without it the command fails, the `|| echo unknown`
+    swallows the error, and it looks like a parsing problem rather than a
+    permissions one.
+    """
+    _status, raw = console.run(
+        "sudo bootc status --json 2>&1 | head -c 4000", timeout=120
+    )
+    _status, parsed = console.run(
+        "sudo bootc status --json 2>/dev/null | "
+        'python3 -c "import json,sys\n'
+        "try:\n"
+        "    d=json.load(sys.stdin)\n"
+        "except Exception as e:\n"
+        "    print('PARSE-ERROR:'+str(e)[:80]); raise SystemExit(0)\n"
+        "b=((d.get('status') or {}).get('booted') or {})\n"
+        "i=(b.get('image') or {})\n"
+        "print(i.get('imageDigest') or ((i.get('image') or {}).get('image')) or 'unknown')\" "
         "|| echo unknown",
         timeout=120,
     )
-    for line in out.splitlines():
+    for line in parsed.splitlines():
         line = line.strip()
-        if line.startswith(("sha256:", "ghcr.io")) or line == "unknown":
-            return line
-    return "unknown"
+        if line.startswith(("sha256:", "ghcr.io", "PARSE-ERROR:")) or line == "unknown":
+            return line, raw.strip()
+    return "unknown", raw.strip()
 
 
 def _greenboot_evidence(console) -> str:
@@ -88,13 +106,15 @@ def run(vm: VM, credentials: dict) -> None:
         )
 
     console.login(user, password, timeout=600)
-    original = _booted_image(console)
+    original, raw = _booted_image(console)
     print(f"rollback: booted deployment before the drill: {original}")
-    if original == "unknown":
+    if original == "unknown" or original.startswith("PARSE-ERROR:"):
         raise AssertionError(
             "could not read the booted image from `bootc status`. The drill "
             "compares before and after, so an unknown 'before' would let any "
-            "'after' look like a successful rollback."
+            "'after' look like a successful rollback.\n"
+            f"  parser said: {original}\n"
+            f"  bootc status --json said:\n    {raw[:1200]}"
         )
 
     # Test scaffolding, not a product change: the drill serves the sabotage image
@@ -134,7 +154,7 @@ def run(vm: VM, credentials: dict) -> None:
         attempts += 1
         try:
             console.login(user, password, timeout=180)
-            current = _booted_image(console)
+            current, _raw = _booted_image(console)
         except Exception as exc:  # noqa: BLE001 — mid-reboot, try again
             print(
                 f"rollback: poll {attempts}: console not ready ({type(exc).__name__})"
