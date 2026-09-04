@@ -53,6 +53,31 @@ command -v skopeo >/dev/null 2>&1 || { echo "negative-test: skopeo required" >&2
 [[ -r "$PUBKEY" ]] || { echo "negative-test: ${PUBKEY} not readable" >&2; exit 2; }
 
 cp "$PUBKEY" "${WORK}/meridian.pub"
+
+# Configure the client the way the IMAGE configures it, using the very file the
+# image ships. policy.json is only half the client side: containers-image does
+# not fetch sigstore attachments unless registries.d opts in, so a test that uses
+# our policy with the runner's registries.d is testing a DIFFERENT client than
+# the one users run — and it fails in the most misleading way available, with
+# "no signature exists" for an image that is correctly signed.
+#
+# That is exactly what happened on the first real signing run: assertions 1 and 3
+# passed, proving enforcement was live, while assertion 2 rejected a good
+# signature because nothing had ever gone to look for it.
+#
+# Copying the shipped file rather than writing an equivalent one means this also
+# tests that artifact. If registries.d is wrong in the image, it is wrong here.
+SHIPPED_REGISTRIES_D="os/rootfs/etc/containers/registries.d"
+mkdir -p "${WORK}/registries.d"
+if [[ -d "$SHIPPED_REGISTRIES_D" ]]; then
+    cp "${SHIPPED_REGISTRIES_D}"/*.yaml "${WORK}/registries.d/"
+    echo "negative-test: using the image's own registries.d:"
+    grep -vE '^\s*#|^\s*$' "${WORK}/registries.d"/*.yaml | sed 's/^/    /'
+else
+    echo "negative-test: ${SHIPPED_REGISTRIES_D} is missing — the image would have" >&2
+    echo "               no way to look up signatures at all." >&2
+    exit 1
+fi
 repo="${SIGNED%%:*}"
 cat > "${WORK}/policy.json" <<POLICY
 {
@@ -73,8 +98,8 @@ POLICY
 
 copy_allowed() {
     rm -rf "${WORK}/out"
-    skopeo --policy "${WORK}/policy.json" copy "docker://${1}" "dir:${WORK}/out" \
-        >/dev/null 2>&1
+    skopeo --policy "${WORK}/policy.json" --registries.d "${WORK}/registries.d" \
+        copy "docker://${1}" "dir:${WORK}/out" >/dev/null 2>&1
 }
 
 failures=0
@@ -88,6 +113,14 @@ if copy_allowed "quay.io/fedora/fedora:44"; then
 else
     echo "  ok    an out-of-scope image is rejected (policy is live)"
 fi
+
+# If this fails again, the next question is always "what is actually up there?",
+# so answer it now rather than in another round trip. containers-image looks for
+# a tag named sha256-<hex>.sig; cosign v3 has been seen writing sha256-<hex>.
+echo "negative-test: signature attachments present for ${repo}:"
+skopeo list-tags "docker://${repo}" 2>/dev/null |
+    grep -oE '"sha256-[a-f0-9]+[^"]*"' | head -4 | sed 's/^/    /' ||
+    echo "    (could not list tags)"
 
 echo "negative-test: 2. the signed image must be ACCEPTED"
 if copy_allowed "$SIGNED"; then
