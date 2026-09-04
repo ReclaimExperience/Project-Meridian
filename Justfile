@@ -151,6 +151,7 @@ test-lint:
     @python3 tests/lint/font_provenance.py
     @python3 tests/lint/font_weight_scale.py
     @python3 tests/lint/plasma_style.py
+    @python3 tests/lint/mockup_recipe.py
     @echo
     @python3 tests/harness/test_pcap.py
     @echo
