@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <g id="topleft">
+    <path d="M0,12 A12,12 0 0 1 12,0 L12,12 Z" fill="#f5f5fa" fill-opacity="0.6"/>
+    <path d="M0.5,12 A11.5,11.5 0 0 1 12,0.5" fill="none" stroke="#000000" stroke-opacity="0.06" stroke-width="1"/>
+  </g>
+  <g id="topright">
+    <path d="M0,0 A12,12 0 0 1 12,12 L0,12 Z" fill="#f5f5fa" fill-opacity="0.6"/>
+    <path d="M0.5,0.5 A11.5,11.5 0 0 1 11.5,12" fill="none" stroke="#000000" stroke-opacity="0.06" stroke-width="1"/>
+  </g>
+  <g id="bottomleft">
+    <path d="M0,0 A12,12 0 0 0 12,12 L12,0 Z" fill="#f5f5fa" fill-opacity="0.6"/>
+    <path d="M0.5,0 A11.5,11.5 0 0 0 12,11.5" fill="none" stroke="#000000" stroke-opacity="0.06" stroke-width="1"/>
+  </g>
+  <g id="bottomright">
+    <path d="M0,12 A12,12 0 0 0 12,0 L0,0 Z" fill="#f5f5fa" fill-opacity="0.6"/>
+    <path d="M0,11.5 A11.5,11.5 0 0 0 11.5,0" fill="none" stroke="#000000" stroke-opacity="0.06" stroke-width="1"/>
+  </g>
+  <g id="top">
+    <rect x="0" y="0" width="8" height="12" fill="#f5f5fa" fill-opacity="0.6"/>
+    <rect x="0" y="0" width="8" height="1" fill="#000000" fill-opacity="0.06"/>
+  </g>
+  <g id="bottom">
+    <rect x="0" y="0" width="8" height="12" fill="#f5f5fa" fill-opacity="0.6"/>
+    <rect x="0" y="11" width="8" height="1" fill="#000000" fill-opacity="0.06"/>
+  </g>
+  <g id="left">
+    <rect x="0" y="0" width="12" height="8" fill="#f5f5fa" fill-opacity="0.6"/>
+    <rect x="0" y="0" width="1" height="8" fill="#000000" fill-opacity="0.06"/>
+  </g>
+  <g id="right">
+    <rect x="0" y="0" width="12" height="8" fill="#f5f5fa" fill-opacity="0.6"/>
+    <rect x="11" y="0" width="1" height="8" fill="#000000" fill-opacity="0.06"/>
+  </g>
+  <g id="center">
+    <rect x="0" y="0" width="8" height="8" fill="#f5f5fa" fill-opacity="0.6"/>
+  </g>
+  <rect id="hint-top-margin" x="0" y="0" width="4" height="4" fill="none"/>
+  <rect id="hint-bottom-margin" x="0" y="0" width="4" height="4" fill="none"/>
+  <rect id="hint-left-margin" x="0" y="0" width="4" height="4" fill="none"/>
+  <rect id="hint-right-margin" x="0" y="0" width="4" height="4" fill="none"/>
+</svg>

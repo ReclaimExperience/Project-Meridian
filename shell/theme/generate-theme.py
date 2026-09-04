@@ -436,6 +436,167 @@ def wallpaper_svg(name: str, spec: dict) -> str:
 """
 
 
+# ---------------------------------------------------------- plasma style ----
+#
+# A Plasma Style is where the panel, popups and tooltips get their material —
+# the translucency, the corner radius and the hairline that a colour scheme
+# cannot express, because a colour scheme has no geometry.
+#
+# These SVGs are NOT pictures. Plasma's FrameSvg slices each file by ELEMENT ID
+# and tiles the result at any size, so the file is a contract:
+#
+#   topleft     top      topright
+#   left       center    right
+#   bottomleft bottom    bottomright
+#
+# Miss an id and Plasma silently falls back to Breeze's element for that slice,
+# which is the present-but-inert failure again — a theme that looks applied and
+# is half someone else's. tests/lint/plasma_style.py asserts every id exists.
+#
+# `hint-*-margin` rects are separate from the frame graphics on purpose: they
+# set the CONTENT inset independently of how big the corner art is, so an 18px
+# radius does not force an 18px padding.
+
+FRAME_TILE = 8  # width/height of the tiling edge and centre cells
+
+
+def _rgba(value: str) -> tuple[str, float]:
+    """Return (#rrggbb, alpha) for a hex or rgba() token."""
+    value = value.strip()
+    if value.startswith("rgba"):
+        parts = [p.strip() for p in value[value.index("(") + 1 : -1].split(",")]
+        r, g, b = (int(float(x)) for x in parts[:3])
+        return f"#{r:02x}{g:02x}{b:02x}", float(parts[3])
+    return value, 1.0
+
+
+def frame_svg(radius: int, fill: str, hairline: str, margin: int) -> str:
+    """One FrameSvg: nine slices of a rounded rect, plus content-margin hints.
+
+    Each slice is drawn as its own geometry rather than a clipped copy of the
+    whole shape. Qt reports an element's bounds ignoring clip paths, so a
+    clipped construction measures as the full rect and every margin comes out
+    wrong — the frame renders, just not where the theme says it does.
+    """
+    fill_hex, fill_alpha = _rgba(fill)
+    line_hex, line_alpha = _rgba(hairline)
+    r, t = radius, FRAME_TILE
+    total_w = total_h = 2 * r + t
+
+    def corner(name: str, x: int, y: int, sweep: str, path: str) -> str:
+        return (
+            f'  <g id="{name}">\n'
+            f'    <path d="{path}" fill="{fill_hex}" fill-opacity="{fill_alpha:g}"/>\n'
+            f'    <path d="{sweep}" fill="none" stroke="{line_hex}" '
+            f'stroke-opacity="{line_alpha:g}" stroke-width="1"/>\n'
+            f"  </g>"
+        )
+
+    def edge(name: str, w: int, h: int, line: tuple | None) -> str:
+        """One tiling edge (or the centre): fill, plus the hairline if any."""
+        out = (
+            f'  <g id="{name}">\n'
+            f'    <rect x="0" y="0" width="{w}" height="{h}" '
+            f'fill="{fill_hex}" fill-opacity="{fill_alpha:g}"/>\n'
+        )
+        if line:
+            lx, ly, lw, lh = line
+            out += (
+                f'    <rect x="{lx}" y="{ly}" width="{lw}" height="{lh}" '
+                f'fill="{line_hex}" fill-opacity="{line_alpha:g}"/>\n'
+            )
+        return out + "  </g>"
+
+    parts = [
+        # --- corners: a filled quarter-disc, with the arc stroked -----------
+        corner(
+            "topleft",
+            0,
+            0,
+            f"M0.5,{r} A{r - 0.5},{r - 0.5} 0 0 1 {r},0.5",
+            f"M0,{r} A{r},{r} 0 0 1 {r},0 L{r},{r} Z",
+        ),
+        corner(
+            "topright",
+            0,
+            0,
+            f"M0.5,0.5 A{r - 0.5},{r - 0.5} 0 0 1 {r - 0.5},{r}",
+            f"M0,0 A{r},{r} 0 0 1 {r},{r} L0,{r} Z",
+        ),
+        corner(
+            "bottomleft",
+            0,
+            0,
+            f"M0.5,0 A{r - 0.5},{r - 0.5} 0 0 0 {r},{r - 0.5}",
+            f"M0,0 A{r},{r} 0 0 0 {r},{r} L{r},0 Z",
+        ),
+        corner(
+            "bottomright",
+            0,
+            0,
+            f"M0,{r - 0.5} A{r - 0.5},{r - 0.5} 0 0 0 {r - 0.5},0",
+            f"M0,{r} A{r},{r} 0 0 0 {r},0 L0,0 Z",
+        ),
+        # --- edges: a tile wide/tall, border line on the outer side ---------
+        edge("top", t, r, (0, 0, t, 1)),
+        edge("bottom", t, r, (0, r - 1, t, 1)),
+        edge("left", r, t, (0, 0, 1, t)),
+        edge("right", r, t, (r - 1, 0, 1, t)),
+        edge("center", t, t, None),
+    ]
+    hints = "\n".join(
+        f'  <rect id="hint-{side}-margin" x="0" y="0" width="{margin}" '
+        f'height="{margin}" fill="none"/>'
+        for side in ("top", "bottom", "left", "right")
+    )
+    body = "\n".join(parts)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        "<!-- GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`. -->\n"
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{total_w}" '
+        f'height="{total_h}" viewBox="0 0 {total_w} {total_h}">\n'
+        f"{body}\n{hints}\n</svg>\n"
+    )
+
+
+def plasma_style(tokens: dict, brand: str) -> dict:
+    """Every file of the `meridian` Plasma Style, keyed by relative path."""
+    light = tokens["color"]["light"]["surface"]
+    radius = tokens["radius"]
+    # Plasma Styles are authored against ONE palette; the colour scheme is what
+    # follows light/dark. The light surface is the base here because Plasma
+    # tints these graphics by the active scheme when the theme declares it.
+    surface, hairline = light["window"], light["hairline"]
+    return {
+        "metadata.json": json.dumps(
+            {
+                "KPlugin": {
+                    "Id": brand.lower(),
+                    "Name": brand,
+                    "Description": (
+                        f"{brand}'s panel, popup and tooltip material. "
+                        "Generated from docs/design/tokens.json."
+                    ),
+                    "License": "GPL-2.0-or-later",
+                    "Version": tokens["meta"]["version"],
+                },
+                "X-Plasma-API": "5.0",
+            },
+            indent=2,
+        )
+        + "\n",
+        "widgets/panel-background.svg": frame_svg(
+            radius["panel"], surface, hairline, 4
+        ),
+        "dialogs/background.svg": frame_svg(radius["popup"], surface, hairline, 8),
+        "widgets/tooltip.svg": frame_svg(radius["popup"], surface, hairline, 6),
+        "widgets/background.svg": frame_svg(radius["card"], surface, hairline, 6),
+        "widgets/plasmoidheading.svg": frame_svg(
+            radius["card"], light["sidebar"], hairline, 4
+        ),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     # --out lets the staleness lint regenerate into a scratch tree and diff,
     # driving THIS file rather than a rewritten copy of it. A check that tests a
@@ -474,6 +635,14 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(spec, dict):
             continue
         extra[wall_root / f"{name}.svg"] = wallpaper_svg(name, spec)
+
+    style_root = Path(
+        str(out).replace(
+            "usr/share/color-schemes", f"usr/share/plasma/desktoptheme/{brand.lower()}"
+        )
+    )
+    for rel, content in plasma_style(tokens, brand).items():
+        extra[style_root / rel] = content
 
     for path, content in extra.items():
         path.parent.mkdir(parents=True, exist_ok=True)

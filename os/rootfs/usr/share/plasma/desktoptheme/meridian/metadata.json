@@ -1,0 +1,10 @@
+{
+  "KPlugin": {
+    "Id": "meridian",
+    "Name": "Meridian",
+    "Description": "Meridian's panel, popup and tooltip material. Generated from docs/design/tokens.json.",
+    "License": "GPL-2.0-or-later",
+    "Version": 1
+  },
+  "X-Plasma-API": "5.0"
+}

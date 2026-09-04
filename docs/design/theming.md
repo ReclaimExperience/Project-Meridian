@@ -141,8 +141,60 @@ about the Breeze *decoration's* configuration surface, not a hard limit of the
 compositor, and it must not be logged as a deviation until that surface has
 been tried.
 
-Not yet established: whether Breeze exposes the radius through `kwinrc` /
-`breezerc`, or hardcodes it. Aurorae remains the documented fallback — the
-engine ships (`org.kde.kwin.aurorae.so`) but `/usr/share/aurorae/themes/` does
-not exist, so taking that route means authoring a theme, which is a larger step
-than configuring one and sits below "config" in the WP-05 priority order.
+**Tried, and it does not reach.** Breeze's decoration KCM exposes exactly one
+control here — a boolean, "Round bottom corners of windows with no borders"
+(`roundedCorners`). No numeric radius. Writing `BorderRadius=14` and
+`CornerRadius=14` into `kwinrc` under `[org.kde.kdecoration3]` and `[Windows]`
+and reconfiguring KWin changed nothing: the rendered corner's inset profile is
+identical before and after, `[6, 4, 2, 2, 1, 1, 0, 0 ...]` pixels — an
+effective radius of about **6px** against the mockup's 14.
+
+That the keys were accepted into `kwinrc` proves nothing; any key can be
+written. The pixels are what was compared (R-I).
+
+**Deviation, logged:** window corner radius is ~6px, not 14px. The engine is
+not the limit — `KDecoration3::Decoration::setBorderRadius(BorderRadius)` takes
+per-corner values and `KWin::BorderRadius` consumes them — but Breeze's
+configuration surface does not expose it. Aurorae remains the escalation if the owner wants the exact 14px — the engine
+ships (`org.kde.kwin.aurorae.so`) but `/usr/share/aurorae/themes/` does not
+exist, so that route means *authoring* a decoration theme, which sits below
+"config" in the WP-05 priority order and is not taken on our own initiative.
+
+## Plasma Style `meridian`
+
+Generated from tokens, like everything else: `surface`, `hairline`, `radius`.
+It is where the panel, popup and tooltip **material** lives — the translucency,
+the corner radius and the hairline that a colour scheme cannot express, because
+a colour scheme has no geometry.
+
+Ships five frames: `widgets/panel-background.svg`, `dialogs/background.svg`,
+`widgets/tooltip.svg`, `widgets/background.svg`, `widgets/plasmoidheading.svg`.
+
+**These SVGs are a contract, not pictures.** Plasma's FrameSvg slices each file
+by element ID and tiles the pieces at whatever size it needs:
+
+```text
+topleft      top       topright
+left        center     right
+bottomleft  bottom     bottomright
+```
+
+A missing id is not an error anyone sees — Plasma falls back to the *default*
+theme's element for that slice, so the frame still renders, as our corners with
+Breeze's edges. Present, correct-looking, half someone else's.
+`tests/lint/plasma_style.py` asserts every id, and is verified to fail when one
+is renamed.
+
+Two construction notes worth keeping:
+
+- Each slice is drawn as its **own geometry**, not as a clipped copy of the
+  whole rounded rect. Qt reports an element's bounds ignoring clip paths, so a
+  clipped construction measures as the full rect and every margin lands wrong.
+- `hint-*-margin` rects are separate from the frame art on purpose: content
+  inset comes from those, so an 18px corner radius does not force 18px padding.
+
+Translucency comes from the token alpha (`surface.window` is
+`rgba(252,252,254,0.94)`), so the material is in the style. The **blur** behind
+it is a KWin effect and belongs to WP-07/08/09 (PRD §5.12 deviation 9) — a
+translucent panel over an unblurred background is the expected intermediate
+state, not a defect.
