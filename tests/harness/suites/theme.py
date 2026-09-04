@@ -24,6 +24,7 @@ naive inversion, and that judgement needs the pair side by side.
 
 from __future__ import annotations
 
+import re
 import time
 
 from harness.screen import wait_for_screen
@@ -37,11 +38,44 @@ SETTLE = 4
 # XDG_RUNTIME_DIR, take them from the session that is actually running: read
 # plasmashell's own environ. A guess would work until the session numbering
 # changed and then fail in a way that looks like the theme being broken.
-SESSION_ENV = (
-    "export $(tr '\\0' '\\n' < /proc/$(pgrep -u $(id -un) -x plasmashell | head -1)/environ"
-    " | grep -aE '^(WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DISPLAY|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE)='"
-    " | xargs -d '\\n')"
-)
+# Commands sent over the serial console run in a login shell with no session
+# environment, so anything talking to the compositor fails with "could not
+# connect to display". The env is captured ONCE, to a file, and sourced before
+# each GUI command.
+#
+# The first version re-ran a `tr | grep | xargs -d` pipeline before every
+# command. It worked in the light pass and HUNG for 90s in the dark one, which
+# is the worst kind of helper: fragile in a way that presents as the thing it is
+# helping being broken. Capturing once means one place to verify, and it is
+# verified rather than assumed.
+SESSION_ENV_FILE = "/tmp/meridian-session-env"
+SESSION_ENV = f". {SESSION_ENV_FILE}"
+
+
+def _capture_session_env(console) -> None:
+    """Snapshot the running session's environment, or fail saying why."""
+    _s, out = console.run(
+        "pid=$(pgrep -u $(id -un) -x plasmashell | head -1); "
+        f"tr '\\0' '\\n' < /proc/$pid/environ 2>/dev/null "
+        "| grep -aE '^(WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DISPLAY|DBUS_SESSION_BUS_ADDRESS)=' "
+        f"| sed 's/^/export /' > {SESSION_ENV_FILE}; "
+        f"echo VARS=$(grep -c . {SESSION_ENV_FILE} 2>/dev/null || echo 0)",
+        timeout=90,
+    )
+    count = 0
+    match = re.search(r"VARS=(\d+)", out)
+    if match:
+        count = int(match.group(1))
+    if count < 2:
+        raise AssertionError(
+            "could not capture the session environment from plasmashell "
+            f"(found {count} variable(s)).\n"
+            f"  guest said: {out.strip()[:200]!r}\n"
+            "  Without WAYLAND_DISPLAY and XDG_RUNTIME_DIR every GUI command "
+            "fails with 'could not connect to display', and the frames would be "
+            "of a session that never changed."
+        )
+    print(f"theme: captured session environment ({count} variables)")
 
 
 def _capture(vm: VM, name: str, theme: str) -> None:
@@ -101,11 +135,26 @@ def run(vm: VM, credentials: dict) -> None:
         description="plasmashell after the GUI login",
     )
     time.sleep(10)
+    _capture_session_env(console)
 
     # Record what the session ACTUALLY resolved, so the montage can state it
     # rather than leaving the reviewer to guess whether the brand face rendered.
-    _s, resolved = console.run("fc-match sans-serif; fc-match monospace", timeout=60)
-    print(f"theme: fonts resolved to:\n{resolved.strip()}")
+    _s, raw = console.run(
+        "echo UI=$(fc-match -f '%{family}' sans-serif) "
+        "MONO=$(fc-match -f '%{family}' monospace)",
+        timeout=90,
+    )
+    resolved = " ".join(
+        p for p in raw.replace(",", " ").split() if p.startswith(("UI=", "MONO="))
+    )
+    if not resolved:
+        raise AssertionError(
+            "could not read the resolved font families.\n"
+            f"  guest said: {raw.strip()[:200]!r}\n"
+            "  The sheet must STATE which typeface rendered. A montage that leaves"
+            " it to inference is how a silent fallback gets approved."
+        )
+    print(f"theme: fonts resolved to {resolved}")
 
     for theme in ("light", "dark"):
         _apply(console, theme)
