@@ -107,7 +107,9 @@ def run(vm: VM, credentials: dict) -> None:
         _capture(vm, "desktop", theme)
 
         console.run(
-            "(kwrite /usr/share/meridian/branding.json &) >/dev/null 2>&1", timeout=60
+            f"{SESSION_ENV}; "
+            "(kwrite /usr/share/meridian/branding.json &) >/dev/null 2>&1",
+            timeout=90,
         )
         time.sleep(8)
         _capture(vm, "window", theme)
