@@ -66,6 +66,61 @@ def frame_rmse(a: Path, b: Path) -> float:
     return float(np.sqrt(((left - right) ** 2).mean()) / 255.0)
 
 
+def changed_region(a: Path, b: Path, tol: int = 14) -> tuple[float, tuple | None]:
+    """What changed between two frames: the fraction of pixels, and their bbox.
+
+    The primitive behind subject assertions. A capture suite's binding claim is
+    that the subject is IN THE FRAME, so the way to check that a context menu
+    opened is to see a bounded, contiguous region of the screen become different
+    — not to trust that the right-click was delivered (R-I).
+
+    `tol` is per-channel: below it, a pixel counts as unchanged. Antialiasing and
+    a blinking cursor move a few values without anything appearing.
+    """
+    import numpy as np
+    from PIL import Image
+
+    left = np.asarray(Image.open(a).convert("RGB"), dtype=np.int16)
+    right = np.asarray(Image.open(b).convert("RGB"), dtype=np.int16)
+    if left.shape != right.shape:
+        return 1.0, None
+    mask = np.abs(left - right).max(axis=2) > tol
+    fraction = float(mask.mean())
+    if not mask.any():
+        return fraction, None
+    rows = np.flatnonzero(mask.any(axis=1))
+    cols = np.flatnonzero(mask.any(axis=0))
+    return fraction, (int(cols[0]), int(rows[0]), int(cols[-1]), int(rows[-1]))
+
+
+def dominant_colours(path: Path, count: int = 6) -> list[tuple[int, int, int]]:
+    """The most common colours in a frame, coarsely quantised.
+
+    Used to assert a wallpaper actually rendered: the gradient's own colours have
+    to be on screen. Comparing against the file we shipped would only prove the
+    file exists, which is the failure this is here to catch.
+    """
+    from PIL import Image
+
+    img = Image.open(path).convert("RGB").resize((160, 100))
+    quant = img.quantize(colors=count, method=Image.Quantize.FASTOCTREE)
+    palette = quant.getpalette() or []
+    counts = sorted(quant.getcolors() or [], reverse=True)
+    out = []
+    for _n, idx in counts[:count]:
+        out.append(tuple(palette[idx * 3 : idx * 3 + 3]))
+    return out
+
+
+def nearest_distance(colour: tuple, candidates: list) -> float:
+    """Smallest Euclidean RGB distance from `colour` to any of `candidates`."""
+    best = 1e9
+    for cand in candidates:
+        d = sum((int(a) - int(b)) ** 2 for a, b in zip(colour, cand)) ** 0.5
+        best = min(best, d)
+    return best
+
+
 def wait_for_screen(
     vm: VM,
     what: str,

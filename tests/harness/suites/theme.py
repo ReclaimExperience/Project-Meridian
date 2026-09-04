@@ -27,7 +27,12 @@ from __future__ import annotations
 import re
 import time
 
-from harness.screen import wait_for_screen
+from harness.screen import (
+    changed_region,
+    dominant_colours,
+    nearest_distance,
+    wait_for_screen,
+)
 from harness.vm import VM
 
 SETTLE = 4
@@ -78,12 +83,13 @@ def _capture_session_env(console) -> None:
     print(f"theme: captured session environment ({count} variables)")
 
 
-def _capture(vm: VM, name: str, theme: str) -> None:
+def _capture(vm: VM, name: str, theme: str, disturb: bool = True) -> None:
     # Nudge the display first. Between captures there are long settles with no
     # input, and the screen blanks: the dark window frame came back at detail
     # 0.00264 — black — and the blank guard refused it. A screensaver is not a
     # theme defect, but a black frame in a colour review is worse than no frame.
-    vm.qmp.wake_display()
+    # disturb=False for transient popups: the wake's click dismisses them.
+    vm.qmp.wake_display(click=disturb)
     time.sleep(SETTLE)
     wait_for_screen(vm, f"{name} ({theme})", keep_as=f"theme-{theme}-{name}")
     print(f"theme: captured {name} ({theme})")
@@ -140,6 +146,153 @@ def _stand_down_greenboot(console) -> None:
     print("theme: greenboot auto-reboot masked for the capture (disclosed in report)")
 
 
+APPS = ("dolphin", "kwrite", "kdialog", "konsole")
+# The wallpaper the mockup shows, so the desktop row compares like with like.
+# WHICH gradient pairs with which theme is an owner decision that has not been
+# made; in KDE the wallpaper is a desktop setting, independent of the colour
+# scheme, so using one for both themes is the honest default rather than a
+# choice smuggled in by the test.
+WALLPAPER = "softViolet"
+# From docs/design/tokens.json — the gradient's own stops. Asserted against the
+# PIXELS, not against the shipped file: proving the SVG exists is precisely the
+# nothing that let three wallpapers ship without ever being on screen.
+WALLPAPER_STOPS = ((0xC3, 0xBF, 0xE3), (0x6D, 0x7A, 0xC2), (0x2C, 0x48, 0x8E))
+
+
+def _close_apps(console) -> None:
+    """Close every app window, and assert none survived.
+
+    A precondition, not housekeeping. The dark desktop frame came back with the
+    light pass's window still in it, and nothing objected — the suite had no
+    notion of what a desktop frame must NOT contain. A process cannot have a
+    window, so an empty process list is a sound proof of an empty desktop.
+    """
+    console.run("pkill -f '" + "|".join(APPS) + "' 2>/dev/null; true", timeout=60)
+    for app in APPS:
+        console.run(f"pkill -x {app} 2>/dev/null; true", timeout=30)
+    time.sleep(3)
+    _s, out = console.run(
+        "echo LEFT=$(pgrep -x " + " -x ".join(APPS) + " 2>/dev/null | wc -l)",
+        timeout=60,
+    )
+    match = re.search(r"LEFT=(\d+)", out)
+    if not match:
+        raise AssertionError(
+            f"could not count app processes; guest said {out.strip()[:200]!r}"
+        )
+    if int(match.group(1)) != 0:
+        raise AssertionError(
+            f"{match.group(1)} app process(es) still running before a desktop "
+            "capture. The frame would contain a window and be labelled 'desktop'."
+        )
+
+
+def _set_wallpaper(console) -> None:
+    """Set the wallpaper with Plasma's own tool, and fail loudly if it refuses."""
+    _s, out = console.run(
+        f"{SESSION_ENV}; plasma-apply-wallpaperimage "
+        f"/usr/share/wallpapers/{WALLPAPER}.svg 2>&1 || echo WALL-FAILED",
+        timeout=180,
+    )
+    if "WALL-FAILED" in out or "error" in out.lower():
+        raise AssertionError(
+            f"could not set the wallpaper: {out.strip()[:300]}\n"
+            "  Three generated gradients have shipped in /usr/share/wallpapers "
+            "since WP-05 began and none has ever been rendered — present and "
+            "inert, and invisible because nothing asked for the effect."
+        )
+    time.sleep(6)
+
+
+def _assert_wallpaper_rendered(frame, theme: str) -> None:
+    """The gradient's colours must be ON SCREEN, not merely installed."""
+    palette = dominant_colours(frame)
+    distances = [nearest_distance(c, list(WALLPAPER_STOPS)) for c in palette]
+    if min(distances) > 90:
+        raise AssertionError(
+            f"the {theme} desktop frame does not contain the {WALLPAPER} gradient.\n"
+            f"  dominant colours: {palette}\n"
+            f"  nearest distance to a gradient stop: {min(distances):.0f} (need <= 90)\n"
+            "  The base image's own wallpaper is what previous sheets showed, "
+            "so a desktop row was comparing Fedora's art to the mockup's."
+        )
+
+
+def _assert_portal_scheme(console, theme: str) -> None:
+    """The xdg-desktop-portal colour-scheme preference must follow the theme.
+
+    Layer 4 of the dark contract (docs/design/theming.md). GTK apps and every
+    Flatpak read this, not the Plasma scheme, so it is the layer that decides
+    whether a browser looks like part of the system. Asserted now, before any
+    GTK app exists to show it, because a preference that silently stops flipping
+    is exactly the kind of inert-but-present this project keeps finding late.
+    """
+    want = 1 if theme == "dark" else 2  # 0 = no preference, 1 = dark, 2 = light
+    _s, out = console.run(
+        f"{SESSION_ENV}; gdbus call --session "
+        "--dest org.freedesktop.portal.Desktop "
+        "--object-path /org/freedesktop/portal/desktop "
+        "--method org.freedesktop.portal.Settings.ReadOne "
+        "org.freedesktop.appearance color-scheme 2>&1",
+        timeout=120,
+    )
+    match = re.search(r"uint32\s+(\d+)", out)
+    if not match:
+        raise AssertionError(
+            "could not read the portal colour-scheme preference.\n"
+            f"  guest said: {out.strip()[:250]!r}\n"
+            "  Without it, dark theme stops at Plasma's own chrome and every "
+            "GTK app stays light — the tell that sinks the illusion."
+        )
+    got = int(match.group(1))
+    if got != want:
+        raise AssertionError(
+            f"portal colour-scheme is {got}, expected {want} for the {theme} "
+            "theme. Plasma's chrome and the portal preference have diverged, so "
+            "GTK apps and Flatpaks would disagree with the desktop around them."
+        )
+    print(f"theme: portal colour-scheme = {got} ({theme})")
+
+
+def _open_menu_asserted(vm: VM, console, theme: str) -> None:
+    """Right-click, and prove a menu appeared before photographing it.
+
+    The failure this replaces: the suite right-clicked, called the capture, and
+    the capture's own wake_display() clicked the menu away. It then wrote
+    theme-<theme>-menu.png and printed "captured menu". Three frames reached the
+    owner with the subject absent.
+
+    KWin's scripting `print` does not reach the journal, so a window-list check
+    is not available here. For a capture suite the stronger claim is anyway
+    about pixels: a menu is a bounded region of the screen that was not there a
+    moment ago.
+    """
+    before = vm.screenshot(f"theme-{theme}-premenu")
+    vm.qmp.move_pointer(16384, 16384)
+    time.sleep(0.6)
+    vm.qmp.click("right")
+    time.sleep(3)
+    after = vm.screenshot(f"theme-{theme}-menucheck")
+    fraction, bbox = changed_region(before, after)
+    if bbox is None or fraction < 0.004:
+        raise AssertionError(
+            f"no menu appeared after the right-click ({fraction:.4%} of pixels "
+            "changed). The frame would be the window behind it, labelled 'menu'."
+        )
+    if fraction > 0.45:
+        raise AssertionError(
+            f"{fraction:.1%} of the screen changed after the right-click — too "
+            "much for a context menu. Something else repainted (a theme change "
+            "still settling, or a window opening), so the frame cannot be "
+            "trusted to show a menu."
+        )
+    width, height = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    print(
+        f"theme: menu on screen ({fraction:.2%} of pixels, {width}x{height} at "
+        f"{bbox[0]},{bbox[1]})"
+    )
+
+
 def run(vm: VM, credentials: dict) -> None:
     console = vm.console
     user, password = credentials["user"], credentials["password"]
@@ -184,22 +337,37 @@ def run(vm: VM, credentials: dict) -> None:
         )
     print(f"theme: fonts resolved to {resolved}")
 
+    _set_wallpaper(console)
+
     for theme in ("light", "dark"):
         _apply(console, theme)
-        _capture(vm, "desktop", theme)
+        _assert_portal_scheme(console, theme)
 
-        console.run(
-            f"{SESSION_ENV}; "
-            "(kwrite /usr/share/meridian/branding.json &) >/dev/null 2>&1",
-            timeout=90,
-        )
-        time.sleep(8)
+        # Desktop: nothing on it. Asserted, because the dark frame arrived with
+        # the light pass's window in it and the suite had no opinion about that.
+        _close_apps(console)
+        _capture(vm, "desktop", theme)
+        _assert_wallpaper_rendered(vm.evidence / f"theme-{theme}-desktop.png", theme)
+
+        # Window: Dolphin, not KWrite. The mockup's window is a file manager, so
+        # comparing KWrite to it made every chrome difference unreadable — noise
+        # where the row is supposed to carry signal. Dolphin also sidesteps the
+        # editor-view colour scheme, which is layer 2 of the dark contract and
+        # is NOT wired yet (docs/design/theming.md).
+        console.run(f"{SESSION_ENV}; (dolphin &) >/dev/null 2>&1", timeout=90)
+        time.sleep(12)
+        _s, out = console.run("echo DOLPHIN=$(pgrep -x dolphin | wc -l)", timeout=60)
+        if "DOLPHIN=0" in out:
+            raise AssertionError(
+                "dolphin did not start, so the window frame would be a desktop "
+                "labelled 'window'."
+            )
         _capture(vm, "window", theme)
 
-        # A context menu, opened where one exists: right-click in the window.
-        vm.qmp.move_pointer(16000, 16000)
-        vm.qmp.click("right")
-        _capture(vm, "menu", theme)
+        # Menu: proven on screen before the shutter, and captured without the
+        # wake-click that used to dismiss it.
+        _open_menu_asserted(vm, console, theme)
+        _capture(vm, "menu", theme, disturb=False)
         vm.qmp.key("esc")
 
         # An actual error state, for the ForegroundNegative coupling check.
@@ -214,8 +382,7 @@ def run(vm: VM, credentials: dict) -> None:
         time.sleep(8)
         _capture(vm, "error", theme)
         vm.qmp.key("ret")
-        console.run("pkill kwrite; pkill kdialog; true", timeout=60)
-        time.sleep(3)
+        _close_apps(console)
 
     # NOT "theme-<arch>": run.py writes the per-run verdict under that name and
     # would replace this. The same collision cost the first over-budget perf run

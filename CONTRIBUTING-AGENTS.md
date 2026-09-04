@@ -34,18 +34,45 @@ You are one agent executing exactly one work package (or one clearly-named slice
   system, and where the effect cannot be reached, say so rather than accepting
   presence as a proxy.
 
-  Three instances, all found late and all the same shape:
+  Four instances, all found late and all the same shape:
 
   | Present | Inert because | Would have shipped as |
   |---|---|---|
   | `greenboot` installed, health checks written, unit correct | nothing runs `systemctl preset-all`, so `WantedBy=` is dead letter without an enablement symlink | ADR-008's automatic rollback **false on every machine** |
   | Font chain configured in the right order, in the right file | `alias`/`prefer` is a *weak* fontconfig binding; Fedora's default binds strongly | the **wrong typeface** rendering everywhere, two substitutions deep |
   | `policy.json` signature rule, proven enforcing under skopeo | `bootc` is a different consumer of the same file | signing verified for a tool **users never run** |
+  | The **theme capture suite** — the apparatus built to catch this class — writing `theme-light-menu.png` and printing `captured menu (light)` | it asserted the file was written, never that a menu was on screen; the right-click missed and the frame is just the window behind it | a compare sheet sent for pixel review with **the subject absent from three frames** |
 
   The tell is always the same: every artifact reads correctly, and nothing in the
   system reports a gap. `tests/lint/units_enabled.py`, the `fc-match` check, and
   the negative test exist because a human noticed the difference between
   configured and in-effect — three times, each time by accident.
+
+  **The fourth row is the rule's sharpest form: even the verifier must verify
+  effect.** A test is code, and it fails this way like any other code. A
+  screenshot test that asserts a file was written rather than that the pixels
+  contain its subject is measuring exactly the nothing greenboot was measuring —
+  green, present, inert. The apparatus built to catch present-but-inert had the
+  defect inside it, which is the strongest available argument that nothing is
+  exempt: a suite gets the same effect-assertion discipline as the product, or it
+  is decoration with a pass rate.
+
+  Concretely, for anything that captures: assert the subject is in the frame
+  before the frame counts. A capture step that cannot assert its own subject is
+  not a weaker test, it is not a test.
+
+  **The fourth row is the rule's sharpest form: even the verifier must verify
+  effect.** A test is code, and it fails this way like any other code. A
+  screenshot test that asserts a file was written rather than that the pixels
+  contain its subject is measuring exactly the nothing that greenboot was
+  measuring — green, present, inert. The apparatus built to catch present-but-
+  inert had the defect in it, which is the strongest available argument that
+  nothing is exempt: a suite gets the same effect-assertion discipline as the
+  product, or it is decoration with a pass rate.
+
+  Concretely, for anything that captures: assert the subject is in the frame
+  before the frame counts. A capture step that cannot assert its own subject is
+  not a weaker test, it is not a test.
 
   The third row is still open: `bootc upgrade` honouring `policy.json` is
   unproven, and is recorded as such rather than assumed from the skopeo result.
