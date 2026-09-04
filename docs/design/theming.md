@@ -21,7 +21,7 @@ the browser, where most of a person's day happens.
 |---|---|---|---|---|
 | 1 | Plasma chrome — panel, titlebars, dialogs, system UI | the Plasma colour scheme | `plasma-apply-colorscheme MeridianLight/Dark` | **Wired and proven.** Titlebars and panel flip in the capture pairs. |
 | 2 | KDE editor views — Kate, KWrite, Konsole | their own KSyntaxHighlighting colour theme, *not* the Plasma scheme | not yet set | **NOT wired.** Observed: a white editor on a dark desktop. |
-| 3 | GTK applications | a GTK theme plus `gtk-application-prefer-dark-theme` | `kde-gtk-config`, which writes `~/.config/gtk-{3,4}.0/` | **Wired, unwitnessed.** `prefer-dark-theme=true` is written and `breeze-gtk-gtk3`/`gtk4` are installed. No GTK app exists in the image, so nothing can demonstrate it. |
+| 3 | GTK applications | a GTK theme plus `gtk-application-prefer-dark-theme` | `kde-gtk-config`, which writes `~/.config/gtk-{3,4}.0/` | **Wired and witnessed.** `adwaita-1-demo` ships in the base image and visibly follows light↔dark; asserted in the capture suite by luminance, not by eye. |
 | 4 | Flatpaks and portal-aware apps | the XDG portal preference `org.freedesktop.appearance color-scheme` | `xdg-desktop-portal-kde`, derived from the active Plasma scheme | **Wired and asserted** — the capture suite reads it over D-Bus each pass and fails if it disagrees with the theme (1 = dark, 2 = light). |
 
 Layer 4 is asserted *before any GTK app exists to display it*, deliberately. A
@@ -39,9 +39,21 @@ witness in the image at all: there is currently **no GTK application of any
 kind** installed, so "GTK apps follow the theme" is a claim with nothing to
 demonstrate it.
 
-A GTK frame belongs in the compare sheet as soon as any GTK app is present.
-Layer 4 being green is necessary, not sufficient — it proves the preference is
-published, not that an application honours it.
+**Layer 4 being green is necessary, not sufficient** — it proves the preference
+is published, not that an application honours it. So the suite runs
+`adwaita-1-demo`, which ships in the base image (no download, no network), and
+asserts the captured frames actually darken: mean luminance must drop by 25+
+between the light and dark passes.
+
+`adwaita-1-demo` is libadwaita, and libadwaita consumes
+`org.freedesktop.appearance color-scheme` — the same mechanism Firefox uses. So
+this is not scaffolding to be replaced: it is the test Firefox inherits when it
+is provisioned via the ISO sideload set.
+
+An earlier claim here — that no GTK application existed in the image at all —
+was wrong. It came from checking a hand-written list of candidate names rather
+than asking what actually links `libgtk`. The same shape as the `rpm -q breeze`
+error (rule R-J): a negative answer to a narrow question read as a general one.
 
 **A correction worth keeping, because it nearly became a build failure.**
 `rpm -q breeze` and `rpm -q breeze-gtk` both answer "not installed", and that

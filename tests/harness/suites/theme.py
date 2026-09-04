@@ -294,6 +294,62 @@ def _assert_portal_scheme(console, theme: str) -> None:
     print(f"theme: portal colour-scheme = {got} ({theme})")
 
 
+def _gtk_witness(vm: VM, console, theme: str):
+    """Prove a GTK application follows the theme, not just that the portal does.
+
+    Layer 3 of the dark contract (docs/design/theming.md). The portal
+    preference flipping is necessary and not sufficient: it proves the value is
+    published, not that anything reads it. "Wired but unwitnessed" is the
+    present-but-inert pattern, and this is the layer where it matters most —
+    it is the difference between the browser going dark with the desktop and
+    glaring white on it.
+
+    `adwaita-1-demo` ships in the base image, so this needs no download and no
+    network. It is libadwaita, which consumes `org.freedesktop.appearance
+    color-scheme` — the same mechanism Firefox uses — so this is the test
+    Firefox inherits when it is provisioned rather than scaffolding.
+    """
+    console.run("pkill -f adwaita-1-demo 2>/dev/null; true", timeout=60)
+    time.sleep(2)
+    console.run(f"{SESSION_ENV}; (adwaita-1-demo &) >/dev/null 2>&1", timeout=90)
+    time.sleep(14)
+    _s, out = console.run("echo GTKAPP=$(pgrep -fc adwaita-1-demo)", timeout=60)
+    if "GTKAPP=0" in out or "GTKAPP=" not in out:
+        raise AssertionError(
+            "adwaita-1-demo did not start, so layer 3 has no witness. The "
+            f"portal value alone proves only that the preference is published. "
+            f"guest said: {out.strip()[:200]!r}"
+        )
+    vm.qmp.wake_display()
+    time.sleep(SETTLE)
+    frame = vm.screenshot(f"theme-{theme}-gtk")
+    console.run("pkill -f adwaita-1-demo 2>/dev/null; true", timeout=60)
+    time.sleep(2)
+    print(f"theme: GTK witness captured ({theme})")
+    return frame
+
+
+def _assert_gtk_followed(light_frame, dark_frame) -> None:
+    """The two GTK frames must actually differ in the direction claimed."""
+    import numpy as np
+    from PIL import Image
+
+    def luma(path):
+        return float(np.asarray(Image.open(path).convert("L"), dtype=np.float64).mean())
+
+    light_l, dark_l = luma(light_frame), luma(dark_frame)
+    if light_l - dark_l < 25:
+        raise AssertionError(
+            f"the GTK app did not follow the theme: mean luminance {light_l:.0f} "
+            f"light vs {dark_l:.0f} dark (need a drop of 25+).\n"
+            "  The portal preference can be correct while nothing reads it. "
+            "That is the state a white browser on a dark desktop is in."
+        )
+    print(
+        f"theme: GTK app followed the theme (luminance {light_l:.0f} -> {dark_l:.0f})"
+    )
+
+
 def _open_menu_asserted(vm: VM, console, theme: str) -> None:
     """Right-click, and prove a menu appeared before photographing it.
 
@@ -383,6 +439,7 @@ def run(vm: VM, credentials: dict) -> None:
     print(f"theme: fonts resolved to {resolved}")
 
     _set_wallpaper(console)
+    gtk_frames: dict = {}
 
     for theme in ("light", "dark"):
         _apply(console, theme)
@@ -415,6 +472,8 @@ def run(vm: VM, credentials: dict) -> None:
             )
         _capture(vm, "window", theme)
 
+        gtk_frames[theme] = _gtk_witness(vm, console, theme)
+
         # An actual error state, for the ForegroundNegative coupling check.
         console.run(
             # Generic copy on purpose: the frame is here to show the error
@@ -428,6 +487,8 @@ def run(vm: VM, credentials: dict) -> None:
         _capture(vm, "error", theme)
         vm.qmp.key("ret")
         _close_apps(console)
+
+    _assert_gtk_followed(gtk_frames["light"], gtk_frames["dark"])
 
     # NOT "theme-<arch>": run.py writes the per-run verdict under that name and
     # would replace this. The same collision cost the first over-budget perf run
