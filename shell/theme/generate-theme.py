@@ -364,9 +364,18 @@ def wallpaper_svg(name: str, spec: dict) -> str:
     """A gradient wallpaper as SVG — the source, never a raster (WP-05 Forbidden).
 
     The angle is the mockup's, measured the CSS way: 160deg means the gradient
-    runs from top-left-ish toward bottom-right-ish. SVG's linearGradient takes a
-    vector instead, so the angle is converted rather than eyeballed — 0deg in CSS
-    points up, and y is inverted between the two coordinate systems.
+    runs from top-left-ish toward bottom-right-ish. SVG has no angle, so the
+    CSS gradient LINE is constructed instead — and it is not simply a unit
+    vector rotated by the angle.
+
+    CSS defines the gradient line through the box centre, with length
+    `|W sin t| + |H cos t|`, chosen so the ramp's ends land exactly on the
+    corners perpendicular to it. Expressing that as an objectBoundingBox vector
+    silently changes the angle, because those units are stretched by the box:
+    the same numbers on a 16:9 canvas describe a steeper ramp than CSS draws.
+    Measured against the mockup's own recipe, that alone was worth a mean of 16
+    RGB — small, systematic, and entirely avoidable. So the gradient is emitted
+    in user space, at the size the asset actually is.
 
     Optional `glows` are radial overlays on top of that gradient. The mockup's
     desktop is not a bare linear gradient, and the difference is not subtle:
@@ -376,12 +385,13 @@ def wallpaper_svg(name: str, spec: dict) -> str:
     """
     import math
 
-    angle = spec["angle"]
-    # CSS gradient angle -> unit vector, then to SVG's y-down space.
-    radians = math.radians(angle - 90)
-    dx, dy = math.cos(radians), math.sin(radians)
-    x1, y1 = 0.5 - dx / 2, 0.5 - dy / 2
-    x2, y2 = 0.5 + dx / 2, 0.5 + dy / 2
+    theta = math.radians(spec["angle"])
+    # CSS: 0deg points up and angles run clockwise; SVG's y grows downward.
+    ux, uy = math.sin(theta), -math.cos(theta)
+    length = abs(WALL_W * math.sin(theta)) + abs(WALL_H * math.cos(theta))
+    cx, cy = WALL_W / 2, WALL_H / 2
+    x1, y1 = cx - ux * length / 2, cy - uy * length / 2
+    x2, y2 = cx + ux * length / 2, cy + uy * length / 2
     stops = "\n".join(
         f'      <stop offset="{offset:g}%" stop-color="{colour}"/>'
         for colour, offset in densify(list(spec["stops"]))
@@ -416,7 +426,8 @@ def wallpaper_svg(name: str, spec: dict) -> str:
 <svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160"
      viewBox="0 0 3840 2160" preserveAspectRatio="xMidYMid slice">
   <defs>
-    <linearGradient id="{name}" x1="{x1:.4f}" y1="{y1:.4f}" x2="{x2:.4f}" y2="{y2:.4f}">
+    <linearGradient id="{name}" gradientUnits="userSpaceOnUse"
+                    x1="{x1:.2f}" y1="{y1:.2f}" x2="{x2:.2f}" y2="{y2:.2f}">
 {stops}
     </linearGradient>{glow_defs}
   </defs>

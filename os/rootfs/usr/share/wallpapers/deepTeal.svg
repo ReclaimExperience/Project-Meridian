@@ -3,7 +3,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160"
      viewBox="0 0 3840 2160" preserveAspectRatio="xMidYMid slice">
   <defs>
-    <linearGradient id="deepTeal" x1="0.3290" y1="0.0302" x2="0.6710" y2="0.9698">
+    <linearGradient id="deepTeal" gradientUnits="userSpaceOnUse"
+                    x1="1348.30" y1="-490.74" x2="2491.70" y2="2650.74">
       <stop offset="0%" stop-color="#90cacd"/>
       <stop offset="6.875%" stop-color="#82c1c5"/>
       <stop offset="13.75%" stop-color="#74b8bd"/>
