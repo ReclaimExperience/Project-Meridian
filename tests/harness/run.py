@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import sys
 import time
 import traceback
@@ -34,7 +35,7 @@ if not __debug__:
         "  green result for a system it never checked."
     )
 
-SUITES = ("smoke", "security", "privacy", "screens", "stories", "perf")
+SUITES = ("smoke", "security", "privacy", "screens", "stories", "perf", "rollback")
 
 
 def find_disk(arch: str) -> Path:
@@ -193,6 +194,12 @@ def main() -> int:
 
     disk = Path(args.disk) if args.disk else find_disk(args.arch)
     credentials = load_credentials()
+    # The rollback drill needs a deliberately broken image to stage. It arrives
+    # by environment rather than as a flag because ci/rollback-drill.sh builds and
+    # publishes it, and the suite refuses to run without one — a drill with
+    # nothing to stage would pass while asserting nothing.
+    if os.environ.get("MERIDIAN_SABOTAGE_REF"):
+        credentials["sabotage_ref"] = os.environ["MERIDIAN_SABOTAGE_REF"]
     module = importlib.import_module(f"harness.suites.{args.suite}")
 
     print(

@@ -155,6 +155,26 @@ verifies its own signature against the shipped public key, which catches a
 mismatched pair; it cannot catch this ordering mistake, which is why the protocol
 is written down rather than left to care.
 
+#### `keyPaths` needs a recent containers-image
+
+`policy.json` uses `keyPaths` (plural), and that is **newer than some consumers**:
+
+| containers-image | `keyPaths` |
+|---|---|
+| Fedora 44 / containers-common 0.67.0 — **what the image ships** | supported |
+| skopeo 1.22+, 1.24 | supported |
+| Ubuntu 24.04 / skopeo 1.13.3 — **what the CI runner has** | **rejected: "Unknown key"** |
+
+That is fine for the product — the machines running this policy carry the newer
+parser, and `bootc install` accepts it. It matters for **tooling**: a check that
+validates the policy with whatever parser the host happens to have will fail on a
+correct file. `tests/lint/policy_json.py` therefore reports an unknown key that IS
+in the allowlist as *version skew*, not a defect, and keeps failing on keys that
+are not.
+
+If anything older ever has to consume this file, `keyPaths` is the thing that
+will break first.
+
 #### Do not write two requirements instead of one
 
 Use `keyPaths` with several keys in **one** `sigstoreSigned` requirement. Multiple

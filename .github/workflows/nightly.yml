@@ -82,3 +82,44 @@ jobs:
             build/evidence/serial-*.log
             build/evidence/*.pcap
           if-no-files-found: warn
+
+  # WP-04's flagship (ADR-008): a bad update must undo itself.
+  #
+  # Nightly rather than per-PR, and deliberately: the drill costs several boots —
+  # the sabotage image has to fail its health check three times before greenboot
+  # rolls back — so it is minutes, not seconds. Per-PR it would be the slowest
+  # gate by a wide margin and would push people to bypass it.
+  #
+  # It is a REQUIRED nightly job, not advisory. ADR-008's self-healing promise is
+  # either mechanically true every night or it is not a promise.
+  rollback-drill:
+    name: rollback-drill
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: extractions/setup-just@v3
+      - name: Install build tools
+        run: sudo apt-get install -y -qq qemu-system-x86 ovmf skopeo
+      - name: Prepare runner storage
+        run: bash ci/prepare-runner.sh
+      - name: Log in to GHCR
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
+      - name: Build the image under test
+        run: bash ci/build.sh x86_64
+      - name: Build the disk image
+        run: bash ci/vm-test.sh x86_64 smoke
+      - name: Rollback drill
+        run: bash ci/rollback-drill.sh x86_64
+      - name: Upload drill evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-drill-evidence
+          path: |
+            build/evidence/*.json
+            build/evidence/serial-*.log
+          if-no-files-found: warn
