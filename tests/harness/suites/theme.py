@@ -45,6 +45,11 @@ SESSION_ENV = (
 
 
 def _capture(vm: VM, name: str, theme: str) -> None:
+    # Nudge the display first. Between captures there are long settles with no
+    # input, and the screen blanks: the dark window frame came back at detail
+    # 0.00264 — black — and the blank guard refused it. A screensaver is not a
+    # theme defect, but a black frame in a colour review is worse than no frame.
+    vm.qmp.wake_display()
     time.sleep(SETTLE)
     wait_for_screen(vm, f"{name} ({theme})", keep_as=f"theme-{theme}-{name}")
     print(f"theme: captured {name} ({theme})")
