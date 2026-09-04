@@ -107,7 +107,10 @@ def run(vm: VM, credentials: dict) -> None:
 
         # An actual error state, for the ForegroundNegative coupling check.
         console.run(
-            "(kdialog --error 'Meridian could not open that file.' &) >/dev/null 2>&1",
+            # Generic copy on purpose: the frame is here to show the error
+            # PALETTE, and the product name belongs in branding.json, not in a
+            # test string that would survive a rebrand.
+            "(kdialog --error 'That file could not be opened.' &) >/dev/null 2>&1",
             timeout=60,
         )
         time.sleep(8)
