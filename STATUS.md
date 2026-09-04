@@ -21,7 +21,7 @@ Status: `TODO` | `IN PROGRESS` | `BLOCKED` | `DONE` | `WAIVED`
 | WP-01 | Base image: builds, boots, publishes | 0 | M | medium (external base) | WP-00 | DONE |
 | WP-02 | De-bloat & package curation | 0 | M | low | WP-01 | DONE |
 | WP-03 | VM test harness & story framework | 0 | L | medium | WP-01 (images to test) | DONE |
-| WP-04 | Update pipeline, rollback, signing | 0 | M | medium | WP-01 | IN PROGRESS |
+| WP-04 | Update pipeline, rollback, signing | 0 | M | medium | WP-01 | DONE |
 | WP-05 | Theme core | 1 | L | medium | WP-02, 03 | TODO |
 | WP-06 | Boot & login: Plymouth, SDDM, silence | 1 | S | low | WP-05 (brand assets) | TODO |
 | WP-07 | Panel layout, KIOSK lockdown, Familiar shortcuts (+pager) | 1 | M | medium | WP-05 | TODO |
@@ -882,6 +882,39 @@ overrides `rpm-ostreed` and flatpak update timers. That collides with ADR-008's
 bootc+greenboot path. Left alone deliberately — WP-04 owns the update pipeline
 and should decide, rather than WP-02 changing update behaviour as a side effect
 of de-bloating.
+
+## WP-04 DONE — 2026-09-04
+
+Every acceptance item met. **Phase 0 is complete: WP-00 through WP-04 are all DONE.**
+
+| Acceptance (PRD WP-04) | Result |
+|---|---|
+| rollback drill green in CI — the flagship | **PASS**, on real hardware; nightly job wired |
+| staged-update flow observed | **PASS** — `bootc switch` staged, reboot activated it |
+| unsigned/wrong-key image REFUSED (negative test) | **PASS** — signed accepted, unsigned refused |
+| no update activity produces user-visible UI | holds — the status file is read-only data for WP-12 |
+
+**Carried forward, recorded rather than closed quietly:**
+
+- **`bootc upgrade` honouring `policy.json` is UNPROVEN.** The negative test
+  proves *skopeo* enforces it; bootc is a different consumer. Last piece of
+  ADR-022's VERIFY. Gates the first `:stable`.
+- **`keyPaths` ANY-vs-ALL is unproven** — matters only for ADR-023's rotation
+  overlap, nothing today.
+- **The recovery key does not exist**, so the fleet trusts one key and is not
+  recoverable. Gates the first `:stable` by design; custodying it earlier would be
+  the wrong instinct (ADR-023 §5).
+- **The permissive `default` in `policy.json` is unresolved.** ADR-022 called it a
+  `:testing`-only state to tighten once the negative test passed. It has passed.
+  My recommendation is to KEEP it: the scoped rule already enforces "our images
+  must be signed" — which is what `bootc upgrade` pulls — while `default: reject`
+  would add nothing to update integrity and would break `toolbox`/`distrobox`,
+  which ADR-004 and PRD 3.2 ship deliberately for Advanced users. **Owner
+  decision, unchanged pending an answer.**
+- `keyPaths` needs containers-image ≥ ~1.14. Ubuntu 24.04's skopeo 1.13.3 rejects
+  it; the image's 0.67.0 accepts it. Portability note in `docs/updates.md`.
+
+---
 
 ## WP-04 — rollback drill GREEN (2026-09-04)
 
