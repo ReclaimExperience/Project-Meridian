@@ -35,7 +35,16 @@ if not __debug__:
         "  green result for a system it never checked."
     )
 
-SUITES = ("smoke", "security", "privacy", "screens", "stories", "perf", "rollback")
+SUITES = (
+    "smoke",
+    "security",
+    "privacy",
+    "screens",
+    "stories",
+    "perf",
+    "rollback",
+    "theme",
+)
 
 
 def find_disk(arch: str) -> Path:

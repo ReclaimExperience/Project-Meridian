@@ -475,6 +475,21 @@ vm-test suite="smoke" arch="":
     [ "$arch" = "arm64" ] && arch=aarch64
     python3 tests/harness/run.py "{{ suite }}" --arch "$arch"
 
+# Capture the theme compare sheet for owner review (WP-05).
+# Captures every surface in both themes, then composes ours beside the mockup
+# crops. The sheet states the resolved font family: a silent fallback is the
+# thing this review exists to catch, so it must not be left to inference.
+theme-montage arch="" mockups="docs/design/mockup/crops":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    arch="{{ arch }}"
+    [ -n "$arch" ] || arch="$(uname -m)"
+    [ "$arch" = "arm64" ] && arch=aarch64
+    python3 tests/harness/run.py theme --arch "$arch"
+    python3 tests/harness/montage.py build/evidence "{{ mockups }}" \
+        build/evidence/theme-compare-sheet.png
+    echo "compare sheet: build/evidence/theme-compare-sheet.png"
+
 # Re-baseline screenshots, deliberately (PRD 7.4, rule R-F).
 # screen: a screen name, or "all". Commit the result on its own, with a
 # STATUS.md note — a baseline that changes quietly is a regression that passed.
