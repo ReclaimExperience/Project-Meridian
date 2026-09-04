@@ -883,6 +883,54 @@ bootc+greenboot path. Left alone deliberately — WP-04 owns the update pipeline
 and should decide, rather than WP-02 changing update behaviour as a side effect
 of de-bloating.
 
+## WP-04 — rollback drill GREEN (2026-09-04)
+
+**The flagship passes.** ADR-008's self-healing promise is mechanically true and
+proven, not asserted:
+
+```text
+before      sha256:7fa949b6…   original
+            staged a sabotage image that breaks graphical.target
+poll 1-4    sha256:88bd7ca6…   the machine ran the BAD deployment
+poll 5      sha256:7fa949b6…   returned to the original on its own
+marker      /var/lib/meridian/rollback-happened @ 2026-09-04T01:29:54Z
+```
+
+**PRD WP-04's `[VERIFY greenboot+bootc integration]` is RESOLVED: greenboot does
+drive bootc's rollback.** The pre-authorized boot-counter fallback is not needed.
+
+Nothing was faked. The sabotage breaks `graphical.target` — what
+`10-meridian-desktop.sh` actually checks — so the real detection path ran, and the
+marker was written by greenboot's own `red.d` hook rather than planted.
+
+**Signing is proven too** (2026-09-03): the negative test is green — signed
+accepted, unsigned refused, policy demonstrably live. ADR-022's hard gate on the
+first `:stable` is satisfied. cosign writes `sha256-<hex>.sig`, so the tag-naming
+incompatibility I feared was a false alarm from my local harness.
+
+**Five scaffolding defects cost a cycle each** getting here, all mine rather than
+the product's: cosign reading a different auth store than skopeo; the negative
+test using the runner's `registries.d` instead of the image's; a `_comment` key in
+`policy.json` that made the image **unbuildable** (against a strict-parser rule I
+had proved myself hours earlier); `bootc status` without `sudo`; and a sudo
+password prompt that HUNG a serial console for 120 s and read as bootc being
+broken. None produced a false pass — each surfaced as a loud, specific failure —
+but the pattern was assuming the environment instead of checking it.
+
+**Two product defects found on the way, both silent:**
+
+- **greenboot was installed and inert.** Nothing in this build runs
+  `systemctl preset-all`, so `WantedBy=` is dead letter and greenboot had no
+  enablement symlink. Automatic rollback would have been false on every machine
+  while every artifact looked correct. `tests/lint/units_enabled.py` now guards it.
+- **greenboot's own DNS health check would roll back offline machines.** It
+  resolves `/etc/ostree/remotes.d`, which IS populated, so a laptop with no Wi-Fi
+  fails and after three boots loses a good update. Disabled, for the same reason
+  our own check asks whether NetworkManager can *start* rather than whether it is
+  *connected*.
+
+---
+
 ## WP-04 in progress — update mechanism and signing (2026-09-03)
 
 **Delivered (PR 1):** `meridian-os-update.{service,timer}` (daily, randomized,
