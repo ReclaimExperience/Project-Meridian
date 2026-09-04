@@ -52,9 +52,13 @@ def build(evidence: Path, mockups: Path, out: Path, note: str = "") -> int:
             if ours is None:
                 print(f"  missing capture: theme-{theme}-{surface}.png")
                 continue
-            theirs = _load(mockups / f"{surface}-{theme}.png") or _load(
-                mockups / f"{surface}.png"
-            )
+            # The owner supplies whatever format is convenient — these arrived
+            # as two JPEGs and a PNG. Insisting on one extension would have made
+            # a reference crop silently "missing" for a reason nobody could see.
+            theirs = None
+            for stem in (f"{surface}-{theme}", surface):
+                for ext in (".png", ".jpg", ".jpeg", ".webp"):
+                    theirs = theirs or _load(mockups / f"{stem}{ext}")
             rows.append((f"{surface} · {theme}", ours, theirs))
 
     if not rows:
