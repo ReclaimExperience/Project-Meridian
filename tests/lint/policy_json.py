@@ -27,6 +27,7 @@ This check is deliberately in two parts:
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -80,10 +81,19 @@ def check_keys(document: dict) -> list[str]:
     return problems
 
 
-def parser_rejects(policy_path: Path) -> bool | None:
-    """Ask containers-image itself. None when skopeo is unavailable."""
+def parser_verdict(policy_path: Path) -> tuple[str, str]:
+    """Ask containers-image itself. Returns (verdict, detail).
+
+    verdict is "accepted", "unknown-key:<key>", "rejected", or "no-skopeo".
+
+    The distinction matters because the local parser is NOT the one that will
+    read this file. Ubuntu 24.04's skopeo is 1.13.3 and rejects `keyPaths`;
+    Fedora 44 — what the IMAGE ships — is 1.22 and accepts it. A check that
+    fails on a correct policy is exactly as harmful as one that passes a broken
+    one, and this check did the former in CI while passing locally.
+    """
     if not shutil.which("skopeo"):
-        return None
+        return "no-skopeo", ""
     result = subprocess.run(
         [
             "skopeo",
@@ -97,7 +107,13 @@ def parser_rejects(policy_path: Path) -> bool | None:
         text=True,
         check=False,
     )
-    return "invalid policy" in (result.stdout + result.stderr)
+    output = result.stdout + result.stderr
+    if "invalid policy" not in output:
+        return "accepted", ""
+    match = re.search(r'Unknown key \\?"([^"\\]+)', output)
+    if match:
+        return f"unknown-key:{match.group(1)}", output.strip()[:200]
+    return "rejected", output.strip()[:200]
 
 
 def main() -> int:
@@ -123,21 +139,45 @@ def main() -> int:
         planted["_comment"] = ["exactly the key that broke the disk image build"]
         bogus.write_text(json.dumps(planted))
 
-        control = parser_rejects(bogus)
-        if control is None:
+        control, _detail = parser_verdict(bogus)
+        if control == "no-skopeo":
             print("  skip  skopeo is not installed; the allowlist above stands alone")
-        elif not control:
-            print("  FAIL  positive control: a policy with a planted unknown key was")
-            print("      ACCEPTED, so this parser is not enforcing anything and a")
-            print("      pass below would mean nothing.")
+        elif not control.startswith("unknown-key:"):
+            print(f"  FAIL  positive control: a planted unknown key gave {control!r},")
+            print("      so this parser is not enforcing anything and a pass below")
+            print("      would mean nothing.")
             failures += 1
         else:
             print("  ok    positive control: a planted unknown key IS rejected")
-            if parser_rejects(POLICY):
-                print("  FAIL  containers-image rejects our shipped policy.json.")
-                failures += 1
-            else:
+            verdict, detail = parser_verdict(POLICY)
+            if verdict == "accepted":
                 print("  ok    containers-image accepts our shipped policy.json")
+            elif verdict.startswith("unknown-key:"):
+                key = verdict.split(":", 1)[1]
+                if key in REQUIREMENT | TOP_LEVEL | IDENTITY:
+                    # Version skew, not a defect. This local parser is older than
+                    # the one the image ships, and the key is valid there.
+                    version = subprocess.run(
+                        ["skopeo", "--version"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    ).stdout.strip()
+                    print(f"  note  this skopeo does not know {key!r} — VERSION SKEW,")
+                    print(f"      not a defect. {version}")
+                    print("      The image ships containers-common 0.67.0, which")
+                    print(f"      supports {key!r}; Ubuntu 24.04's skopeo 1.13.3 does")
+                    print("      not. The allowlist above is the authority here.")
+                    print("      Portability note: policy.json needs a consumer new")
+                    print(f"      enough for {key!r}.")
+                else:
+                    print(f"  FAIL  containers-image rejects an unknown key {key!r},")
+                    print("      and it is not one containers-policy.json(5) defines.")
+                    print(f"      {detail}")
+                    failures += 1
+            else:
+                print(f"  FAIL  containers-image rejects our policy: {detail}")
+                failures += 1
 
     print()
     if failures:
