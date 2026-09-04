@@ -1,0 +1,38 @@
+# A deliberately broken image, for the rollback drill (WP-04).
+#
+# It breaks the thing our health check ACTUALLY CHECKS — graphical.target — so
+# the drill exercises the real detection path. WP-04's Forbidden list rules out
+# "shortening the drill by faking the failure detection", and that is exactly
+# what sabotaging the health check itself, or planting the rollback marker by
+# hand, would be. This image is broken the way a bad update is broken: it boots,
+# and then the desktop never arrives.
+#
+# Built FROM the image under test, so the only difference between the good
+# deployment and the bad one is this unit.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Ordered before graphical.target and required by it, so the target cannot
+# succeed. `/bin/false` rather than anything clever: the point is a clean,
+# unambiguous failure that the health check will observe as "graphical.target
+# was not reached", which is the first thing 10-meridian-desktop.sh asserts.
+RUN printf '%s\n' \
+    '[Unit]' \
+    'Description=Rollback drill sabotage — makes graphical.target fail' \
+    'Before=graphical.target' \
+    'DefaultDependencies=no' \
+    '' \
+    '[Service]' \
+    'Type=oneshot' \
+    'ExecStart=/bin/false' \
+    'RemainAfterExit=no' \
+    '' \
+    '[Install]' \
+    'RequiredBy=graphical.target' \
+    > /usr/lib/systemd/system/meridian-drill-sabotage.service \
+ && mkdir -p /etc/systemd/system/graphical.target.requires \
+ && ln -sf /usr/lib/systemd/system/meridian-drill-sabotage.service \
+      /etc/systemd/system/graphical.target.requires/meridian-drill-sabotage.service \
+ && echo "SABOTAGE" > /usr/share/meridian/drill-sabotage-marker
+
+RUN ostree container commit

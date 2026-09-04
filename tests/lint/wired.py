@@ -57,6 +57,7 @@ CI_SCRIPTS = {
     "ci/verify-signing-policy.sh": "build",
     "ci/sign-image.sh": "sign",
     "ci/negative-test-signing.sh": "sign",
+    "ci/rollback-drill.sh": "rollback-drill",
 }
 
 # Job names branch protection requires on `main`. Kept here so a rename shows up
