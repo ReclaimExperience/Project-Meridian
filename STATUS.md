@@ -904,13 +904,15 @@ Every acceptance item met. **Phase 0 is complete: WP-00 through WP-04 are all DO
 - **The recovery key does not exist**, so the fleet trusts one key and is not
   recoverable. Gates the first `:stable` by design; custodying it earlier would be
   the wrong instinct (ADR-023 §5).
-- **The permissive `default` in `policy.json` is unresolved.** ADR-022 called it a
-  `:testing`-only state to tighten once the negative test passed. It has passed.
-  My recommendation is to KEEP it: the scoped rule already enforces "our images
-  must be signed" — which is what `bootc upgrade` pulls — while `default: reject`
-  would add nothing to update integrity and would break `toolbox`/`distrobox`,
-  which ADR-004 and PRD 3.2 ship deliberately for Advanced users. **Owner
-  decision, unchanged pending an answer.**
+- **RESOLVED by ADR-024: the permissive `default` stays.** Integrity rides on the
+  explicit scoped rule, which is the only path a routine update takes.
+  `default: reject` would break `toolbox`/`distrobox` while buying ~nothing
+  against an attacker who already has code execution. The standing guard —
+  integrity-critical scopes must be explicit, never the default — is now
+  mechanical: `tests/lint/policy_json.py` asserts the scope exists and names a
+  key (every PR), and the negative test proves it enforces (every push to main).
+  Both were verified to FAIL when the scope is deleted or downgraded to
+  accept-anything.
 - `keyPaths` needs containers-image ≥ ~1.14. Ubuntu 24.04's skopeo 1.13.3 rejects
   it; the image's 0.67.0 accepts it. Portability note in `docs/updates.md`.
 
