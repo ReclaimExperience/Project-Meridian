@@ -323,6 +323,25 @@ vm-image arch="x86_64":
     [[customizations.files]]
     path = "/etc/plasma-setup-done"
     data = "dev disk image only - see Justfile\n"
+
+    # Passwordless sudo for the harness account, in THIS DISK IMAGE ONLY.
+    #
+    # The harness drives root-only commands over the serial console (bootc
+    # status, bootc switch, journalctl) and a password prompt there does not
+    # fail, it HANGS until the step times out. The rollback drill lost a full
+    # cycle to a 120-second wait that looked like bootc being broken.
+    #
+    # The alternative was piping the password into sudo -S, which is worse: the
+    # serial transcript is saved as build evidence, so every artifact would carry
+    # the credential.
+    #
+    # This lands in the qcow2's customizations, never in the container image we
+    # publish. PRD 7.4's rule holds, and ci/check-no-test-user.sh independently
+    # greps published images for this account AND for sudoers entries naming it,
+    # so the guard against it escaping is not this comment.
+    [[customizations.files]]
+    path = "/etc/sudoers.d/99-harness"
+    data = "mtest ALL=(ALL) NOPASSWD: ALL\n"
     TOML
     sed -i'' -e 's/^    //' "$conf"
 

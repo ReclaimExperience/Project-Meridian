@@ -43,16 +43,17 @@ def _booted_image(console) -> tuple[str, str]:
     first run of this drill returned unknown and the transcript held nothing to
     explain it — the diagnostic cost more than the fix.
 
-    Uses sudo: `bootc status` reads the deployment state and the harness logs in
-    as an unprivileged user. Without it the command fails, the `|| echo unknown`
-    swallows the error, and it looks like a parsing problem rather than a
-    permissions one.
+    Uses `sudo -n`, never bare `sudo`. The harness account can sudo but the disk
+    image must grant it without a password: a prompt on a serial console does not
+    fail, it HANGS until the step times out, and the drill lost a cycle to a
+    120-second wait that read like bootc being broken. `-n` turns that into an
+    instant, legible error.
     """
     _status, raw = console.run(
-        "sudo bootc status --json 2>&1 | head -c 4000", timeout=120
+        "sudo -n bootc status --json 2>&1 | head -c 4000", timeout=120
     )
     _status, parsed = console.run(
-        "sudo bootc status --json 2>/dev/null | "
+        "sudo -n bootc status --json 2>/dev/null | "
         'python3 -c "import json,sys\n'
         "try:\n"
         "    d=json.load(sys.stdin)\n"
@@ -80,7 +81,10 @@ def _greenboot_evidence(console) -> str:
             "healthcheck result",
             "systemctl is-active greenboot-healthcheck.service 2>&1",
         ),
-        ("boot counter", "grub2-editenv list 2>/dev/null | grep -i boot || echo none"),
+        (
+            "boot counter",
+            "sudo -n grub2-editenv list 2>/dev/null | grep -i boot || echo none",
+        ),
         (
             "greenboot journal",
             "journalctl -u greenboot-healthcheck --no-pager -n 8 2>&1 | tail -8",
@@ -123,15 +127,15 @@ def run(vm: VM, credentials: dict) -> None:
     # image is OBTAINED, never how the failure is detected or how rollback is
     # decided, which are what the drill asserts.
     console.run(
-        "sudo mkdir -p /etc/containers/registries.conf.d && "
+        "sudo -n mkdir -p /etc/containers/registries.conf.d && "
         "printf '[[registry]]\\nlocation = \"10.0.2.2:5000\"\\ninsecure = true\\n' | "
-        "sudo tee /etc/containers/registries.conf.d/99-drill.conf >/dev/null",
+        "sudo -n tee /etc/containers/registries.conf.d/99-drill.conf >/dev/null",
         timeout=120,
     )
 
     print(f"rollback: staging the sabotage image {sabotage}")
-    _st, out = console.run(f"sudo bootc switch --retain {sabotage}", timeout=900)
-    _s, staged = console.run("sudo bootc status 2>&1 | head -30", timeout=120)
+    _st, out = console.run(f"sudo -n bootc switch --retain {sabotage}", timeout=900)
+    _s, staged = console.run("sudo -n bootc status 2>&1 | head -30", timeout=120)
     if "sabotage" not in staged and "10.0.2.2" not in staged:
         raise AssertionError(
             "the sabotage image does not appear staged, so a reboot would prove "
@@ -141,7 +145,7 @@ def run(vm: VM, credentials: dict) -> None:
         )
     print("rollback: sabotage staged; rebooting into it")
 
-    console.send_line("sudo systemctl reboot")
+    console.send_line("sudo -n systemctl reboot")
 
     # The machine now boots the sabotage, fails its health check, and greenboot
     # retries. Poll rather than sleep: each failed boot still reaches multi-user
