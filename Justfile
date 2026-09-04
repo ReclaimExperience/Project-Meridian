@@ -146,6 +146,8 @@ test-lint:
     @echo
     @python3 tests/lint/policy_json.py
     @echo
+    @python3 tests/lint/theme_generated.py
+    @echo
     @python3 tests/harness/test_pcap.py
     @echo
     @python3 tests/harness/test_suite_guards.py
@@ -502,8 +504,11 @@ perf budget="" arch="":
 # ----------------------------------------------------------------- assets ---
 
 # Regenerate rasters/wallpapers from SVG sources and template branding strings
+# Regenerate everything derived from docs/design/tokens.json (WP-05).
+# tests/lint/theme_generated.py fails if a committed artifact has drifted, so
+# this is how you fix that — never by editing the generated file.
 assets:
-    @just _todo WP-05 "assets"
+    @python3 shell/theme/generate-color-schemes.py
 
 # -------------------------------------------------------------------- iso ---
 
