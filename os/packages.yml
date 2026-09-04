@@ -47,7 +47,13 @@ add:
   # install. Noto (incl. CJK and emoji) is already in the base.
   # Schibsted Grotesk, PRD 4.1's brand face, is not packaged in Fedora at all
   # and has to be bundled — that belongs to WP-05's branding work, not here.
-  - rsms-inter-fonts        # Inter, PRD 4.1's UI face.
+  - rsms-inter-fonts        # Inter, PRD 4.1's UI face — and, until Schibsted
+                            # Grotesk is bundled, the one that actually renders.
+  - jetbrains-mono-fonts    # PRD 4.1's fixed face, for KWrite and the hidden
+                            # terminal. Its absence was invisible until the font
+                            # chain was tested: `monospace` silently resolved to
+                            # Noto Sans Mono, which is a different typeface with
+                            # the same job.
 
   # --- update machinery (ADR-008); WP-04 configures it ---------------------
   - greenboot                    # boot health checks -> automatic rollback

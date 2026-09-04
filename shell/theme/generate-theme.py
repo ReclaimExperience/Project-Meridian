@@ -228,32 +228,35 @@ def kdeglobals(tokens: dict, brand: str) -> str:
 def fontconfig(tokens: dict) -> str:
     """The family chain, in the token order (PRD §4.1).
 
-    Written as fontconfig preferences rather than aliases so a missing family
-    falls through to the next rather than resolving to whatever fontconfig
-    guesses. The order is the contract: Schibsted Grotesk, then Inter, then Noto
-    Sans — and if the first is not installed the second renders, which is a
-    visible difference the theme review is expected to catch.
+    Uses `match`/`edit` with **binding="strong"**, not `alias`/`prefer`. That is
+    not a style choice — the alias form was tried first and lost: `sans-serif`
+    still resolved to Noto Sans even with our file sorting last in conf.d,
+    because alias/prefer produces a WEAK binding and Fedora's default-font
+    configuration binds strongly. Ordering was never the problem, so renaming the
+    file to `99-` did nothing.
+
+    With the strong form, `sans-serif` resolves to Inter today and will resolve to
+    Schibsted Grotesk the moment it is bundled — the chain falls through in token
+    order rather than silently landing on whatever fontconfig would have picked.
     """
-    ui = tokens["font"]["ui"]
-    mono = tokens["font"]["mono"]
-    prefer = "\n".join(f"      <family>{f}</family>" for f in ui)
-    prefer_mono = "\n".join(f"      <family>{f}</family>" for f in mono)
+    families = "\n".join(f"      <string>{f}</string>" for f in tokens["font"]["ui"])
+    mono = "\n".join(f"      <string>{f}</string>" for f in tokens["font"]["mono"])
     return f"""<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
 <!-- GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`. -->
 <fontconfig>
-  <alias>
-    <family>sans-serif</family>
-    <prefer>
-{prefer}
-    </prefer>
-  </alias>
-  <alias>
-    <family>monospace</family>
-    <prefer>
-{prefer_mono}
-    </prefer>
-  </alias>
+  <match target="pattern">
+    <test qual="any" name="family"><string>sans-serif</string></test>
+    <edit name="family" mode="prepend" binding="strong">
+{families}
+    </edit>
+  </match>
+  <match target="pattern">
+    <test qual="any" name="family"><string>monospace</string></test>
+    <edit name="family" mode="prepend" binding="strong">
+{mono}
+    </edit>
+  </match>
 </fontconfig>
 """
 
