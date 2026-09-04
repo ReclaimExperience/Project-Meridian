@@ -1,0 +1,15 @@
+# System default desktop containment (PRD §4.4, WP-05).
+#
+# WP-05 owns only the WALLPAPER here. Panel layout, applets and the taskbar are
+# WP-07's containment work — this file exists so the desktop shows our surface
+# instead of stock Plasma's, which is what makes a theme review meaningful.
+#
+# The image is the token default (softViolet) as SVG: Plasma renders it directly,
+# and a gradient rasterises identically at any size, so there is no PNG to ship
+# and no raster-without-source to justify.
+[Containments][1]
+wallpaperplugin=org.kde.image
+
+[Containments][1][Wallpaper][org.kde.image][General]
+Image=file:///usr/share/wallpapers/softViolet.svg
+FillMode=2

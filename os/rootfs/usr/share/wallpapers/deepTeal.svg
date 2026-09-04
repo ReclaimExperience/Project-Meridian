@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160"
+     viewBox="0 0 3840 2160" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="deepTeal" x1="0.3290" y1="0.0302" x2="0.6710" y2="0.9698">
+      <stop offset="0%" stop-color="#90cacd"/>
+      <stop offset="55%" stop-color="#008192"/>
+      <stop offset="100%" stop-color="#003f64"/>
+    </linearGradient>
+  </defs>
+  <rect width="3840" height="2160" fill="url(#deepTeal)"/>
+</svg>

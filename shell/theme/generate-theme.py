@@ -261,6 +261,40 @@ def fontconfig(tokens: dict) -> str:
 """
 
 
+def wallpaper_svg(name: str, spec: dict) -> str:
+    """A gradient wallpaper as SVG — the source, never a raster (WP-05 Forbidden).
+
+    The angle is the mockup's, measured the CSS way: 160deg means the gradient
+    runs from top-left-ish toward bottom-right-ish. SVG's linearGradient takes a
+    vector instead, so the angle is converted rather than eyeballed — 0deg in CSS
+    points up, and y is inverted between the two coordinate systems.
+    """
+    import math
+
+    angle = spec["angle"]
+    # CSS gradient angle -> unit vector, then to SVG's y-down space.
+    radians = math.radians(angle - 90)
+    dx, dy = math.cos(radians), math.sin(radians)
+    x1, y1 = 0.5 - dx / 2, 0.5 - dy / 2
+    x2, y2 = 0.5 + dx / 2, 0.5 + dy / 2
+    stops = "\n".join(
+        f'      <stop offset="{offset}%" stop-color="{colour}"/>'
+        for colour, offset in spec["stops"]
+    )
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!-- GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160"
+     viewBox="0 0 3840 2160" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="{name}" x1="{x1:.4f}" y1="{y1:.4f}" x2="{x2:.4f}" y2="{y2:.4f}">
+{stops}
+    </linearGradient>
+  </defs>
+  <rect width="3840" height="2160" fill="url(#{name})"/>
+</svg>
+"""
+
+
 def main(argv: list[str] | None = None) -> int:
     # --out lets the staleness lint regenerate into a scratch tree and diff,
     # driving THIS file rather than a rewritten copy of it. A check that tests a
@@ -288,6 +322,18 @@ def main(argv: list[str] | None = None) -> int:
         Path(str(out).replace("usr/share/color-schemes", "etc/fonts/conf.d"))
         / "60-meridian-families.conf": fontconfig(tokens),
     }
+    # Wallpapers: SVG sources only. WP-05 forbids shipping a raster without its
+    # SVG source, and a gradient rasterises identically at any size, so the SVG
+    # IS the asset — Plasma renders it directly.
+    wallpapers = tokens["wallpaper"]
+    wall_root = Path(
+        str(out).replace("usr/share/color-schemes", "usr/share/wallpapers")
+    )
+    for name, spec in wallpapers.items():
+        if not isinstance(spec, dict):
+            continue
+        extra[wall_root / f"{name}.svg"] = wallpaper_svg(name, spec)
+
     for path, content in extra.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)

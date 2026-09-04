@@ -30,6 +30,9 @@ GENERATED = (
     "usr/share/color-schemes/MeridianDark.colors",
     "etc/xdg/kdeglobals",
     "etc/fonts/conf.d/60-meridian-families.conf",
+    "usr/share/wallpapers/softViolet.svg",
+    "usr/share/wallpapers/dusk.svg",
+    "usr/share/wallpapers/deepTeal.svg",
 )
 
 
