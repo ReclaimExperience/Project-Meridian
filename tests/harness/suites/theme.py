@@ -31,6 +31,18 @@ from harness.vm import VM
 
 SETTLE = 4
 
+# Commands sent over the serial console run in a login shell with no session
+# environment, so anything that talks to the compositor fails with
+# "could not connect to display". Rather than guessing WAYLAND_DISPLAY and
+# XDG_RUNTIME_DIR, take them from the session that is actually running: read
+# plasmashell's own environ. A guess would work until the session numbering
+# changed and then fail in a way that looks like the theme being broken.
+SESSION_ENV = (
+    "export $(tr '\\0' '\\n' < /proc/$(pgrep -u $(id -un) -x plasmashell | head -1)/environ"
+    " | grep -aE '^(WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DISPLAY|DBUS_SESSION_BUS_ADDRESS|XDG_SESSION_TYPE)='"
+    " | xargs -d '\\n')"
+)
+
 
 def _capture(vm: VM, name: str, theme: str) -> None:
     time.sleep(SETTLE)
@@ -47,7 +59,8 @@ def _apply(console, theme: str) -> None:
     """
     scheme = "MeridianDark" if theme == "dark" else "MeridianLight"
     _status, out = console.run(
-        f"plasma-apply-colorscheme {scheme} 2>&1 || echo APPLY-FAILED", timeout=120
+        f"{SESSION_ENV}; plasma-apply-colorscheme {scheme} 2>&1 || echo APPLY-FAILED",
+        timeout=180,
     )
     if "APPLY-FAILED" in out or "not found" in out.lower():
         raise AssertionError(
@@ -110,8 +123,9 @@ def run(vm: VM, credentials: dict) -> None:
             # Generic copy on purpose: the frame is here to show the error
             # PALETTE, and the product name belongs in branding.json, not in a
             # test string that would survive a rebrand.
+            f"{SESSION_ENV}; "
             "(kdialog --error 'That file could not be opened.' &) >/dev/null 2>&1",
-            timeout=60,
+            timeout=90,
         )
         time.sleep(8)
         _capture(vm, "error", theme)
