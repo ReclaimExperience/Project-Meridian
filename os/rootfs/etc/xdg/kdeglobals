@@ -3,11 +3,11 @@
 
 [General]
 ColorScheme=MeridianLight
-font=Schibsted Grotesk,14,-1,5,400,0,0,0,0,0
-fixed=JetBrains Mono,13,-1,5,400,0,0,0,0,0
-menuFont=Schibsted Grotesk,14,-1,5,400,0,0,0,0,0
-smallestReadableFont=Schibsted Grotesk,11,-1,5,400,0,0,0,0,0
-toolBarFont=Schibsted Grotesk,12.5,-1,5,400,0,0,0,0,0
+font=Schibsted Grotesk,14,-1,5,50,0,0,0,0,0
+fixed=JetBrains Mono,13,-1,5,50,0,0,0,0,0
+menuFont=Schibsted Grotesk,14,-1,5,50,0,0,0,0,0
+smallestReadableFont=Schibsted Grotesk,11,-1,5,50,0,0,0,0,0
+toolBarFont=Schibsted Grotesk,12.5,-1,5,50,0,0,0,0,0
 widgetStyle=Breeze
 
 [KDE]
@@ -18,4 +18,4 @@ AnimationDurationFactor=0.5
 Theme=breeze
 
 [WM]
-activeFont=Schibsted Grotesk,13.5,-1,5,600,0,0,0,0,0
+activeFont=Schibsted Grotesk,13.5,-1,5,63,0,0,0,0,0

@@ -191,10 +191,21 @@ def kdeglobals(tokens: dict, brand: str) -> str:
     mono = font["mono"][0]
     body = font["size"]["body"]
 
-    # KDE font entries: family,size,weight-ish,italic,weight,...  The trailing
-    # fields are Qt's; only family and size are ours to set from tokens.
+    # KDE font entries are QFont::toString(). The TEN-field form is Qt's legacy
+    # serialisation, and its weight field is the old 0..99 scale — NOT the CSS
+    # 100..900 scale that QFont::Weight uses in Qt6. Writing 400 there does not
+    # mean Normal; it is far past 99 and clamps to the heaviest weight
+    # available.
+    #
+    # It shipped that way and rendered the entire UI in Schibsted Grotesk Black.
+    # Proven in the VM by writing both values and comparing frames: 400 -> black,
+    # 50 -> normal. kde-gtk-config had been reporting it all along, translating
+    # the parsed value into `gtk-font-name=Schibsted Grotesk, Black 14`.
+    QT5_WEIGHT = {400: 50, 500: 57, 600: 63, 700: 75}
+
     def entry(family: str, size: float, weight: int = 400) -> str:
-        return f"{family},{size:g},-1,5,{weight},0,0,0,0,0"
+        legacy = QT5_WEIGHT[weight]
+        return f"{family},{size:g},-1,5,{legacy},0,0,0,0,0"
 
     return "\n".join(
         [
