@@ -1010,3 +1010,113 @@ job lacked Pillow), but it moves the boundary out one more step.
 - Not delivered, recorded rather than hidden: OCR text assertions, the vncdotool
   input fallback, and the `perf` suite (blocked on WP-02's scripts).
   **→ `perf` DELIVERED by WP-02 (2026-09-03); OCR and vncdotool remain open.**
+
+---
+
+## Defect found during WP-05: an exhausted boot counter bricks the bootloader
+
+**Severity: this is the product's central claim failing, not a test-rig fault.**
+
+Found 2026-09-04 while capturing theme screenshots. The `theme` suite had been
+failing with `no login prompt within 600s — is a serial getty running?`. A getty
+was never the question. The serial transcript:
+
+```text
+BdsDxe: starting Boot0001 "UEFI Misc Device"
+GRUB version 2.12 ... Meridian OS 1.0.0-dev (ostree:0)
+BdsDxe: starting Boot0000 "UiApp"
+This is the option one adjusts to change the language for the current system
+   ... the same line, several hundred times
+```
+
+GRUB drew its menu, handed control back to the firmware, and BDS fell through to
+the UEFI setup application. Read out of GRUB's own command line:
+
+```text
+boot_counter=-1   boot_success=0   default=1
+```
+
+The greenboot boot-attempt counter is exhausted and negative, `boot_success` was
+never set, and `grub.cfg` has therefore selected fallback entry **index 1 — which
+does not exist**. The menu holds one entry (`ostree:0`). GRUB is pointed at a
+deployment that is not there, so it boots nothing.
+
+**The failure mode:** a machine whose greenboot health check never reports
+success decrements `boot_counter` on every boot. Once it is exhausted, if there
+is no second deployment to fall back to, the machine stops booting entirely — no
+rollback, no recovery, dead at the bootloader with no terminal to fix it from.
+That is the exact outcome PRD §3 (`bootc` + greenboot) exists to make impossible,
+and it is worse for us than for a conventional distro: INV-0 means the owner has
+no terminal, and our recovery story assumes a bootable deployment.
+
+Note what the WP-04 rollback drill did *not* catch. It proved greenboot drives
+`bootc rollback` **when a fallback deployment exists**. It never tested the state
+this machine reached: counter exhausted, single deployment. A green drill and a
+brickable machine coexisted.
+
+**Root cause, established 2026-09-04 by running the check under `bash -x`
+inside the VM:** our own required check `10-meridian-desktop.sh` is a race it
+loses about half the time.
+
+```text
++ elapsed=78 ; systemctl is-active --quiet graphical.target ; [[ 78 -ge 90 ]]
++ elapsed=80 ; systemctl is-active --quiet graphical.target
++ echo 'greenboot: graphical.target reached in under 90s'
+greenboot: desktop health checks passed
+```
+
+The check polls `graphical.target` with a **90-second deadline**. On this VM the
+target takes **~80 seconds** to go active — a ten-second margin. Every boot that
+overruns is judged unhealthy, greenboot reboots the machine (observed on the
+serial console: `Broadcast message from root@fedora: The system will reboot
+now!`, about three minutes into the boot), and `boot_counter` decrements. The
+counter never recovers, so the machine walks itself down to the brick state
+above. Confirmed decrementing in one sitting: 3 → 1 over two boots.
+
+Two things make this worse than a slow boot:
+
+- `graphical.target` is **not the effect we care about**. Throughout those 80
+  seconds `plasmalogin.service` is *already active and running* and
+  `display-manager.service` reports active — the greeter is up and a person
+  could log in. The check is asserting a systemd abstraction that lags the thing
+  it stands for. Rule R-I, and this time we wrote the presence-check ourselves.
+- The likely reason the target lags is `NetworkManager-wait-online.service`,
+  visible in the boot log and default-capped at ~90s. A machine with no network
+  — precisely the case check 3 goes out of its way not to punish — is therefore
+  the *most* likely to be rebooted to death by check 1.
+
+**Still not established (do not assume):**
+
+- Whether a freshly installed machine on real hardware reaches `graphical.target`
+  fast enough to hide this. Faster hardware narrows the race; it does not remove
+  it, and a slow disk or a missing network widens it again.
+- Whether `NetworkManager-wait-online` is the whole delay, or only part.
+- Whether stock greenboot guards against `default` exceeding the menu length.
+
+**Owed, and none of it done yet:**
+
+1. Establish why `boot_success` stays 0 on a healthy boot.
+2. A `bootc`-level guard: never select a fallback index that has no menu entry.
+   Refusing to boot is strictly worse than re-trying a deployment that has
+   already booted.
+3. A test that asserts the effect: a machine with a *failing* health check and a
+   *single* deployment must still reach a shell. Rule R-I — the drill asserted
+   rollback happens, not that the machine survives having nowhere to roll back to.
+
+**The repair applied to the test disk is a workaround, not a fix.** `boot_success`
+and `boot_counter` were reset from the GRUB command line via `save_env`. The disk
+boots again; the defect is untouched and the disk will drift back.
+
+### Harness faults found alongside it
+
+- `Console.login()` nudged with a newline every 10s from the moment it attached.
+  Before Linux owns the serial console the reader is UEFI, then GRUB, where a
+  keystroke is a menu selection. The nudges cycled the firmware's language menu
+  for 600s. Fixed: wait for evidence that userspace owns the console, refuse to
+  type at firmware. The same failure now reports in 4s with its true cause.
+  Regression test: `tests/harness/test_console_firmware.py`.
+- The harness runs against a **mutable golden disk**. The WP-04 drill's boot-state
+  changes persisted into every later run. Suites should boot a copy-on-write
+  overlay so no run can poison the next. **Not yet done.**
+- `VM.stop()` leaked a `qemu-system-x86_64` holding the disk's write lock, which
+  presented as an unrelated "Failed to get write lock". **Not yet fixed.**

@@ -5,7 +5,7 @@ A real 10-minute failure, from build/evidence/serial-x86_64.log:
 
     BdsDxe: starting Boot0001 "UEFI Misc Device"
     GRUB version 2.12
-      Press enter to boot the selected OS ...  Meridian OS 1.0.0-dev (ostree:0)
+      Press enter to boot the selected OS ...  <product> 1.0.0-dev (ostree:0)
     BdsDxe: starting Boot0000 "UiApp"
     This is the option one adjusts to change the language for the current system
     ... the same line, hundreds of times ...
