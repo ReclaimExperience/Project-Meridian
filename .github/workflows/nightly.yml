@@ -112,6 +112,30 @@ jobs:
         run: bash ci/build.sh x86_64
       - name: Build the disk image
         run: bash ci/vm-test.sh x86_64 smoke
+
+      # CI is the authority on what ships; a local build is only an
+      # accelerator. Publishing the disk here means the visual review and the
+      # VM suites can run against the artifact that was actually built from
+      # main, on a machine with no local privilege — and it unblocks anyone
+      # without rootful podman, which bootc-image-builder requires and which a
+      # dev box may reasonably not grant.
+      #
+      # Uploaded BEFORE the drill: the drill deliberately stages a sabotage
+      # image and rolls back, so the disk it leaves behind is mutated boot
+      # state, not a clean image.
+      #
+      # compression-level 0 because qcow2 is already zlib-compressed; zipping
+      # it again spends minutes to save nothing. Retention is short because
+      # the file is multi-gigabyte and a stale disk is worse than no disk.
+      - name: Upload the bootable disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: meridian-qcow2-x86_64
+          path: build/qcow2/*.qcow2
+          compression-level: 0
+          retention-days: 5
+          if-no-files-found: error
+
       - name: Rollback drill
         run: bash ci/rollback-drill.sh x86_64
       - name: Upload drill evidence

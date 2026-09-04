@@ -59,6 +59,22 @@ add:
   - greenboot                    # boot health checks -> automatic rollback
   - greenboot-default-health-checks
 
+  # --- theming substrate (WP-05) -------------------------------------------
+  # Both approved by the owner after the WP-05 compare sheet.
+  - breeze                 # The Qt widget style. `widgetStyle=Breeze` has been
+                           # in our kdeglobals since WP-05 began while the style
+                           # itself was absent from the image — selected but not
+                           # installed, which is R-I's inversion and just as
+                           # silent: Qt falls back without saying anything, and
+                           # every app draws in a style we did not choose.
+  - breeze-gtk             # Layer 3 of the dark contract (docs/design/theming.md).
+                           # kde-gtk-config already writes
+                           # gtk-application-prefer-dark-theme=true, so the
+                           # preference was set with no theme to apply it. This
+                           # is the mechanism a dark Firefox depends on, and
+                           # Firefox is a Flatpak (ADR-004/ADR-010) that arrives
+                           # via the ISO sideload set, not this image.
+
 # Packages removed from the base image.
 #
 # Two kinds: things an ADR forbids, and things PRD 3.2 leaves out. Both are

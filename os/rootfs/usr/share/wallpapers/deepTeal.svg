@@ -8,6 +8,16 @@
       <stop offset="55%" stop-color="#008192"/>
       <stop offset="100%" stop-color="#003f64"/>
     </linearGradient>
+    <radialGradient id="deepTeal-glow0" cx="0.16" cy="0.1" r="0.68">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="deepTeal-glow1" cx="0.88" cy="0.86" r="0.74">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
   </defs>
   <rect width="3840" height="2160" fill="url(#deepTeal)"/>
+  <rect width="3840" height="2160" fill="url(#deepTeal-glow0)"/>
+  <rect width="3840" height="2160" fill="url(#deepTeal-glow1)"/>
 </svg>

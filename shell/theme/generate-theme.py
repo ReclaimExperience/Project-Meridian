@@ -279,6 +279,12 @@ def wallpaper_svg(name: str, spec: dict) -> str:
     runs from top-left-ish toward bottom-right-ish. SVG's linearGradient takes a
     vector instead, so the angle is converted rather than eyeballed — 0deg in CSS
     points up, and y is inverted between the two coordinate systems.
+
+    Optional `glows` are radial overlays on top of that gradient. The mockup's
+    desktop is not a bare linear gradient, and the difference is not subtle:
+    without the glows the wallpaper renders flatter and cooler than the design,
+    which is exactly how the first review read it. The base stops were already
+    token-correct; the depth was the missing part.
     """
     import math
 
@@ -292,6 +298,21 @@ def wallpaper_svg(name: str, spec: dict) -> str:
         f'      <stop offset="{offset}%" stop-color="{colour}"/>'
         for colour, offset in spec["stops"]
     )
+    glow_defs, glow_rects = "", ""
+    for index, glow in enumerate(spec.get("glows", [])):
+        glow_defs += (
+            f'\n    <radialGradient id="{name}-glow{index}" '
+            f'cx="{glow["cx"]}" cy="{glow["cy"]}" r="{glow["r"]}">\n'
+            f'      <stop offset="0%" stop-color="{glow["color"]}" '
+            f'stop-opacity="{glow["opacity"]}"/>\n'
+            f'      <stop offset="100%" stop-color="{glow["color"]}" '
+            f'stop-opacity="0"/>\n'
+            f"    </radialGradient>"
+        )
+        glow_rects += (
+            f'\n  <rect width="3840" height="2160" fill="url(#{name}-glow{index})"/>'
+        )
+
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!-- GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160"
@@ -299,9 +320,9 @@ def wallpaper_svg(name: str, spec: dict) -> str:
   <defs>
     <linearGradient id="{name}" x1="{x1:.4f}" y1="{y1:.4f}" x2="{x2:.4f}" y2="{y2:.4f}">
 {stops}
-    </linearGradient>
+    </linearGradient>{glow_defs}
   </defs>
-  <rect width="3840" height="2160" fill="url(#{name})"/>
+  <rect width="3840" height="2160" fill="url(#{name})"/>{glow_rects}
 </svg>
 """
 

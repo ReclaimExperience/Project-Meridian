@@ -3,102 +3,447 @@
   "$id": "tokens.schema.json",
   "title": "Design tokens (PRD Appendix A / section 4)",
   "type": "object",
-  "required": ["meta", "font", "color", "wallpaper", "radius", "elevation", "material", "layout", "motion"],
+  "required": [
+    "meta",
+    "font",
+    "color",
+    "wallpaper",
+    "radius",
+    "elevation",
+    "material",
+    "layout",
+    "motion"
+  ],
   "$defs": {
-    "color": { "type": "string", "minLength": 3,
-               "description": "hex, rgba() or oklch() literal" },
+    "color": {
+      "type": "string",
+      "minLength": 3,
+      "description": "hex, rgba() or oklch() literal"
+    },
     "inkSet": {
-      "type": "object", "required": ["primary", "secondary", "tertiary"],
-      "additionalProperties": { "$ref": "#/$defs/color" }
+      "type": "object",
+      "required": [
+        "primary",
+        "secondary",
+        "tertiary"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/color"
+      }
     },
     "accent": {
-      "type": "object", "required": ["oklch", "hex"],
+      "type": "object",
+      "required": [
+        "oklch",
+        "hex"
+      ],
       "properties": {
-        "oklch": { "type": "string", "pattern": "^oklch\\(" },
-        "hex": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "hoverHex": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "darkHex": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+        "oklch": {
+          "type": "string",
+          "pattern": "^oklch\\("
+        },
+        "hex": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "hoverHex": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "darkHex": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        }
       }
     },
     "gradientStops": {
-      "type": "array", "minItems": 2,
-      "items": { "type": "array", "prefixItems": [
-        { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        { "type": "number", "minimum": 0, "maximum": 100 } ], "minItems": 2, "maxItems": 2 }
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "array",
+        "prefixItems": [
+          {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        ],
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "glows": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "description": "Radial overlays layered over the linear gradient. The mockup's desktop is not a bare gradient: two soft radial glows give it depth and most of its warmth, and without them the wallpaper reads flatter and cooler.",
+      "items": {
+        "type": "object",
+        "required": [
+          "cx",
+          "cy",
+          "r",
+          "color",
+          "opacity"
+        ],
+        "properties": {
+          "cx": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 2
+          },
+          "cy": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 2
+          },
+          "r": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "opacity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
     }
   },
   "properties": {
-    "$schema": { "type": "string" },
+    "$schema": {
+      "type": "string"
+    },
     "meta": {
-      "type": "object", "required": ["authoritative_space", "version"],
+      "type": "object",
+      "required": [
+        "authoritative_space",
+        "version"
+      ],
       "properties": {
-        "source": { "type": "string" },
-        "authoritative_space": { "const": "oklch",
-          "description": "PRD 4.2: OKLCH stays authoritative; hex is the shipped Qt form." },
-        "version": { "type": "integer", "minimum": 1 }
+        "source": {
+          "type": "string"
+        },
+        "authoritative_space": {
+          "const": "oklch",
+          "description": "PRD 4.2: OKLCH stays authoritative; hex is the shipped Qt form."
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "font": {
-      "type": "object", "required": ["ui", "mono", "size", "weight"],
+      "type": "object",
+      "required": [
+        "ui",
+        "mono",
+        "size",
+        "weight"
+      ],
       "properties": {
-        "ui": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "mono": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "size": { "type": "object",
-          "required": ["body", "secondary", "caption", "overline", "title", "hero"],
-          "additionalProperties": { "type": "number", "exclusiveMinimum": 0 } },
-        "weight": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 100, "maximum": 900 } },
-        "overline": { "type": "object" }
+        "ui": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "mono": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "size": {
+          "type": "object",
+          "required": [
+            "body",
+            "secondary",
+            "caption",
+            "overline",
+            "title",
+            "hero"
+          ],
+          "additionalProperties": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "weight": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 900
+          }
+        },
+        "overline": {
+          "type": "object"
+        }
       }
     },
     "color": {
-      "type": "object", "required": ["light", "dark", "accent", "system"],
+      "type": "object",
+      "required": [
+        "light",
+        "dark",
+        "accent",
+        "system"
+      ],
       "properties": {
-        "light": { "type": "object", "required": ["ink", "surface"],
-                   "properties": { "ink": { "$ref": "#/$defs/inkSet" }, "surface": { "type": "object" },
-                                   "onAccent": { "$ref": "#/$defs/color" } } },
-        "dark":  { "type": "object", "required": ["ink", "surface"],
-                   "properties": { "ink": { "$ref": "#/$defs/inkSet" }, "surface": { "type": "object" },
-                                   "onAccent": { "$ref": "#/$defs/color" } } },
-        "accent": {
-          "type": "object", "required": ["blue", "violet", "green", "red", "graphite", "default"],
+        "light": {
+          "type": "object",
+          "required": [
+            "ink",
+            "surface"
+          ],
           "properties": {
-            "blue": { "$ref": "#/$defs/accent" }, "violet": { "$ref": "#/$defs/accent" },
-            "green": { "$ref": "#/$defs/accent" }, "red": { "$ref": "#/$defs/accent" },
-            "graphite": { "$ref": "#/$defs/accent" },
-            "default": { "enum": ["blue", "violet", "green", "red", "graphite"] }
+            "ink": {
+              "$ref": "#/$defs/inkSet"
+            },
+            "surface": {
+              "type": "object"
+            },
+            "onAccent": {
+              "$ref": "#/$defs/color"
+            }
           }
         },
-        "system": { "type": "object", "required": ["closeHover"],
-                    "properties": { "closeHover": { "const": "#e5484d",
-                      "description": "PRD 4.2: close-button hover is always this red." },
-                                    "closeHoverInk": { "$ref": "#/$defs/color" } } },
-        "logoGradient": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
-        "heroGradient": { "type": "array", "items": { "type": "string" }, "minItems": 2 }
+        "dark": {
+          "type": "object",
+          "required": [
+            "ink",
+            "surface"
+          ],
+          "properties": {
+            "ink": {
+              "$ref": "#/$defs/inkSet"
+            },
+            "surface": {
+              "type": "object"
+            },
+            "onAccent": {
+              "$ref": "#/$defs/color"
+            }
+          }
+        },
+        "accent": {
+          "type": "object",
+          "required": [
+            "blue",
+            "violet",
+            "green",
+            "red",
+            "graphite",
+            "default"
+          ],
+          "properties": {
+            "blue": {
+              "$ref": "#/$defs/accent"
+            },
+            "violet": {
+              "$ref": "#/$defs/accent"
+            },
+            "green": {
+              "$ref": "#/$defs/accent"
+            },
+            "red": {
+              "$ref": "#/$defs/accent"
+            },
+            "graphite": {
+              "$ref": "#/$defs/accent"
+            },
+            "default": {
+              "enum": [
+                "blue",
+                "violet",
+                "green",
+                "red",
+                "graphite"
+              ]
+            }
+          }
+        },
+        "system": {
+          "type": "object",
+          "required": [
+            "closeHover"
+          ],
+          "properties": {
+            "closeHover": {
+              "const": "#e5484d",
+              "description": "PRD 4.2: close-button hover is always this red."
+            },
+            "closeHoverInk": {
+              "$ref": "#/$defs/color"
+            }
+          }
+        },
+        "logoGradient": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2
+        },
+        "heroGradient": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2
+        }
       }
     },
     "wallpaper": {
-      "type": "object", "required": ["softViolet", "dusk", "deepTeal", "default"],
+      "type": "object",
+      "required": [
+        "softViolet",
+        "dusk",
+        "deepTeal",
+        "default"
+      ],
       "properties": {
-        "softViolet": { "type": "object", "required": ["angle", "stops"],
-                        "properties": { "angle": { "type": "number" }, "stops": { "$ref": "#/$defs/gradientStops" } } },
-        "dusk":       { "type": "object", "required": ["angle", "stops"],
-                        "properties": { "angle": { "type": "number" }, "stops": { "$ref": "#/$defs/gradientStops" } } },
-        "deepTeal":   { "type": "object", "required": ["angle", "stops"],
-                        "properties": { "angle": { "type": "number" }, "stops": { "$ref": "#/$defs/gradientStops" } } },
-        "default": { "enum": ["softViolet", "dusk", "deepTeal"] }
+        "softViolet": {
+          "type": "object",
+          "required": [
+            "angle",
+            "stops"
+          ],
+          "properties": {
+            "angle": {
+              "type": "number"
+            },
+            "stops": {
+              "$ref": "#/$defs/gradientStops"
+            },
+            "glows": {
+              "$ref": "#/$defs/glows"
+            }
+          }
+        },
+        "dusk": {
+          "type": "object",
+          "required": [
+            "angle",
+            "stops"
+          ],
+          "properties": {
+            "angle": {
+              "type": "number"
+            },
+            "stops": {
+              "$ref": "#/$defs/gradientStops"
+            },
+            "glows": {
+              "$ref": "#/$defs/glows"
+            }
+          }
+        },
+        "deepTeal": {
+          "type": "object",
+          "required": [
+            "angle",
+            "stops"
+          ],
+          "properties": {
+            "angle": {
+              "type": "number"
+            },
+            "stops": {
+              "$ref": "#/$defs/gradientStops"
+            },
+            "glows": {
+              "$ref": "#/$defs/glows"
+            }
+          }
+        },
+        "default": {
+          "enum": [
+            "softViolet",
+            "dusk",
+            "deepTeal"
+          ]
+        }
       }
     },
-    "radius":    { "type": "object", "required": ["window", "panel", "popup", "card", "control", "field", "pill"],
-                   "additionalProperties": { "type": "number", "minimum": 0 } },
-    "elevation": { "type": "object", "required": ["window", "popup", "bar", "card"],
-                   "additionalProperties": { "type": "string" } },
-    "material":  { "type": "object", "required": ["blur", "blurPopup", "saturate"],
-                   "additionalProperties": { "type": "number" } },
-    "layout":    { "type": "object",
-                   "required": ["taskbarHeight", "taskbarMargin", "startWidth", "quickWidth"],
-                   "additionalProperties": { "type": "number", "exclusiveMinimum": 0 } },
-    "motion":    { "type": "object", "required": ["popup", "toggle", "window", "reducedMotionHonored"],
-                   "properties": { "reducedMotionHonored": { "const": true,
-                     "description": "PRD 4.3: prefers-reduced-motion is honored. Not negotiable." } } }
+    "radius": {
+      "type": "object",
+      "required": [
+        "window",
+        "panel",
+        "popup",
+        "card",
+        "control",
+        "field",
+        "pill"
+      ],
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "elevation": {
+      "type": "object",
+      "required": [
+        "window",
+        "popup",
+        "bar",
+        "card"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "material": {
+      "type": "object",
+      "required": [
+        "blur",
+        "blurPopup",
+        "saturate"
+      ],
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "layout": {
+      "type": "object",
+      "required": [
+        "taskbarHeight",
+        "taskbarMargin",
+        "startWidth",
+        "quickWidth"
+      ],
+      "additionalProperties": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      }
+    },
+    "motion": {
+      "type": "object",
+      "required": [
+        "popup",
+        "toggle",
+        "window",
+        "reducedMotionHonored"
+      ],
+      "properties": {
+        "reducedMotionHonored": {
+          "const": true,
+          "description": "PRD 4.3: prefers-reduced-motion is honored. Not negotiable."
+        }
+      }
+    }
   }
 }
