@@ -61,21 +61,23 @@ You are one agent executing exactly one work package (or one clearly-named slice
   before the frame counts. A capture step that cannot assert its own subject is
   not a weaker test, it is not a test.
 
-  **The fourth row is the rule's sharpest form: even the verifier must verify
-  effect.** A test is code, and it fails this way like any other code. A
-  screenshot test that asserts a file was written rather than that the pixels
-  contain its subject is measuring exactly the nothing that greenboot was
-  measuring — green, present, inert. The apparatus built to catch present-but-
-  inert had the defect in it, which is the strongest available argument that
-  nothing is exempt: a suite gets the same effect-assertion discipline as the
-  product, or it is decoration with a pass rate.
-
-  Concretely, for anything that captures: assert the subject is in the frame
-  before the frame counts. A capture step that cannot assert its own subject is
-  not a weaker test, it is not a test.
-
   The third row is still open: `bootc upgrade` honouring `policy.json` is
   unproven, and is recorded as such rather than assumed from the skopeo result.
+
+- **R-J: An anomaly you cannot explain is a thread to pull now.** The
+  font-weight defect — the whole UI rendering in Schibsted Grotesk Black — was
+  visible in this work package's *first* probe, as
+  `gtk-font-name=Schibsted Grotesk, Black 14` in a settings file. It was seen,
+  described as "worth your eye", and filed as an oddity. It then cost a day and
+  reached an owner review before anyone pulled it.
+
+  The cost asymmetry is the whole argument: chasing an anomaly costs minutes,
+  shipping one costs a day plus a false review. "Worth your eye" is the sound a
+  bug makes before it becomes expensive.
+
+  So: when an observation does not fit the model, reconcile it, or write it down
+  as an open question with a name. A passing remark is not a record, and the
+  next session will not find it.
 
 ### 14.4 Context discipline (you are an Opus 5 medium agent; budget accordingly)
 Load only listed inputs; grep before reading whole files; summarize long tool output into your working notes instead of re-reading; if context tightens, STOP at a clean commit + STATUS.md "Open threads" + hand off rather than degrading quality. An L-size WP expects 5–8 sessions — plan your slice to land something verified each session.

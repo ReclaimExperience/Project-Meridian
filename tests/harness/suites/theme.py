@@ -10,8 +10,10 @@ What it captures, and why each earns a frame:
   * **desktop** — wallpaper, and the only place the gradient is visible at size.
   * **window** — a themed app window (KWrite): titlebar, chrome, text on surface.
     The three-step ink hierarchy is legible here and nowhere else.
-  * **menu** — a context menu: the material, hairline and radius system on a
-    popup, which is the surface closest to what WP-07 will later blur.
+  * **menu** — the DESKTOP context menu (Plasma's own), because that is the one
+    the mockup shows and the one the Plasma Style paints. An app's menu is
+    Breeze-drawn and much less stylable, which is a limit to accept rather than
+    a gap to chase.
   * **error** — an error dialog. This one is a specific check, not decoration:
     close-hover reaches Breeze through the scheme's `ForegroundNegative`, and
     that role is ALSO KDE's error-text colour. Both are now #e5484d. Almost
@@ -306,7 +308,12 @@ def _open_menu_asserted(vm: VM, console, theme: str) -> None:
     moment ago.
     """
     before = vm.screenshot(f"theme-{theme}-premenu")
-    vm.qmp.move_pointer(16384, 16384)
+    # The DESKTOP menu, not an app's. The mockup's menu is Plasma's own
+    # (Personalize / Display Settings), which is the one our Plasma Style will
+    # paint; an app's context menu is drawn by Breeze and is far less stylable,
+    # so comparing Dolphin's menu to the mockup compared two different things.
+    # Bottom-left quadrant, clear of the centred window and above the panel.
+    vm.qmp.move_pointer(5000, 20000)
     time.sleep(0.6)
     vm.qmp.click("right")
     time.sleep(3)
@@ -387,6 +394,12 @@ def run(vm: VM, credentials: dict) -> None:
         _capture(vm, "desktop", theme)
         _assert_wallpaper_rendered(vm.evidence / f"theme-{theme}-desktop.png", theme)
 
+        # Menu: proven on screen before the shutter, and captured without the
+        # wake-click that used to dismiss it.
+        _open_menu_asserted(vm, console, theme)
+        _capture(vm, "menu", theme, disturb=False)
+        vm.qmp.key("esc")
+
         # Window: Dolphin, not KWrite. The mockup's window is a file manager, so
         # comparing KWrite to it made every chrome difference unreadable — noise
         # where the row is supposed to carry signal. Dolphin also sidesteps the
@@ -401,12 +414,6 @@ def run(vm: VM, credentials: dict) -> None:
                 "labelled 'window'."
             )
         _capture(vm, "window", theme)
-
-        # Menu: proven on screen before the shutter, and captured without the
-        # wake-click that used to dismiss it.
-        _open_menu_asserted(vm, console, theme)
-        _capture(vm, "menu", theme, disturb=False)
-        vm.qmp.key("esc")
 
         # An actual error state, for the ForegroundNegative coupling check.
         console.run(
