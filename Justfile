@@ -142,6 +142,8 @@ test-lint:
     @echo
     @python3 tests/lint/test_update_status.py
     @echo
+    @python3 tests/lint/units_enabled.py
+    @echo
     @python3 tests/harness/test_pcap.py
     @echo
     @python3 tests/harness/test_suite_guards.py
