@@ -71,6 +71,48 @@ base image's default while being reviewed as ours. Present, correct, and inert.
 desktop setting independent of the colour scheme, so the suite uses one for both
 themes rather than inventing a pairing the owner has not made.
 
+### Open: the Soft Violet ramp does not match the mockup
+
+Measured, not estimated. Nine sample points across the mockup's desktop against
+our generated ramp, mean ΔRGB **83**, worst **185** at bottom-right.
+
+Two candidate explanations were implemented and then measured, and **neither
+accounts for it**:
+
+- The missing radial glows — now implemented as authored. Worth ~10 RGB at the
+  corner where they are strongest, and nothing in the middle.
+- sRGB versus perceptual interpolation — the stops are now densified along the
+  OKLCh path. Worth **1–3 RGB**. The three Soft Violet stops sit close enough in
+  hue (290°, 275°, 265°) that the two curves nearly coincide; the 100+ midpoint
+  error that this fix was expected to remove is not present between *these*
+  colours. The fix is still correct and stays, but it did not explain anything.
+
+Mean ΔRGB after both: **82**. So the residual is the base ramp itself.
+
+Fitting a plane to the mockup's clean wallpaper area gives:
+
+| | mockup (fitted) | tokens / PRD 4.2 |
+|---|---|---|
+| light end | `#f2c7ff` | `#c3bfe3` |
+| 55% | `#a885da` | `#6d7ac2` |
+| dark end | `#5d43b3` | `#2c488e` |
+| ramp angle | ~254° (light on the **right**) | 160° (light **top-left**) |
+| canvas | 5208×3264, aspect **1.596** (16:10) | SVG authored 3840×2160 (16:9) |
+
+The mockup's ramp is violet throughout and runs light-right to dark-left. Ours
+is lavender-to-**navy** and runs light-top-left to dark-bottom-right — close to
+perpendicular, and a different hue family. No amount of glow or interpolation
+closes that.
+
+Caveats on the fit, stated so it is not over-read: the plane fit includes the
+glows, which lift both ends; a three-stop ramp is not exactly planar; and JPEG
+plus the aspect-ratio difference add noise. The direction and the hue family are
+unambiguous; the exact stop values are indicative.
+
+**This is R-K's case: extraction infidelity, not an authority conflict.** The
+tokens were extracted from the mockup and drifted. Awaiting the owner's
+reconciliation of the specific stops before anything is built on this ground.
+
 ## Fonts
 
 `Schibsted Grotesk` (UI) and `JetBrains Mono` (monospace), bound **strongly** in

@@ -5,16 +5,30 @@
   <defs>
     <linearGradient id="dusk" x1="0.3290" y1="0.0302" x2="0.6710" y2="0.9698">
       <stop offset="0%" stop-color="#ecc5a7"/>
+      <stop offset="7.5%" stop-color="#e7b99a"/>
+      <stop offset="15%" stop-color="#e1ac8e"/>
+      <stop offset="22.5%" stop-color="#dca083"/>
+      <stop offset="30%" stop-color="#d69379"/>
+      <stop offset="37.5%" stop-color="#d18770"/>
+      <stop offset="45%" stop-color="#ca7a68"/>
+      <stop offset="52.5%" stop-color="#c46e61"/>
       <stop offset="60%" stop-color="#bd615b"/>
+      <stop offset="65%" stop-color="#b25862"/>
+      <stop offset="70%" stop-color="#a65169"/>
+      <stop offset="75%" stop-color="#984a6e"/>
+      <stop offset="80%" stop-color="#8a4571"/>
+      <stop offset="85%" stop-color="#7a4073"/>
+      <stop offset="90%" stop-color="#6b3c74"/>
+      <stop offset="95%" stop-color="#5b3872"/>
       <stop offset="100%" stop-color="#4b346f"/>
     </linearGradient>
-    <radialGradient id="dusk-glow0" cx="0.16" cy="0.1" r="0.68">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.3"/>
+    <radialGradient id="dusk-glow0" gradientUnits="userSpaceOnUse" cx="768" cy="324" r="1152" gradientTransform="translate(0 111.375) scale(1 0.65625)">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.2"/>
       <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="dusk-glow1" cx="0.88" cy="0.86" r="0.74">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    <radialGradient id="dusk-glow1" gradientUnits="userSpaceOnUse" cx="3072" cy="1944" r="1344" gradientTransform="translate(0 694.286) scale(1 0.642857)">
+      <stop offset="0%" stop-color="#785ac8" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#785ac8" stop-opacity="0"/>
     </radialGradient>
   </defs>
   <rect width="3840" height="2160" fill="url(#dusk)"/>

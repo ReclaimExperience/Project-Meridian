@@ -272,6 +272,94 @@ def fontconfig(tokens: dict) -> str:
 """
 
 
+WALL_W, WALL_H = 3840, 2160
+
+# --------------------------------------------------------------- oklch ------
+#
+# The mockup's gradients are authored in CSS as
+# `linear-gradient(160deg, oklch(...), oklch(...) 55%, oklch(...))`, which
+# interpolates PERCEPTUALLY: the ramp keeps its lightness and chroma through
+# the midpoint. An SVG `linearGradient` interpolates its stops in sRGB, which
+# between a light violet and a dark blue dips darker and muddier in the middle
+# — the same endpoints, a visibly different ramp, and enough to throw 100+ RGB
+# at the midpoint on its own.
+#
+# So the stops are densified: the oklch path is sampled into intermediate sRGB
+# stops close enough together that sRGB interpolation between neighbours is
+# indistinguishable from the perceptual curve.
+
+
+def _srgb_to_linear(c: float) -> float:
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _linear_to_srgb(c: float) -> float:
+    return 12.92 * c if c <= 0.0031308 else 1.055 * (c ** (1 / 2.4)) - 0.055
+
+
+def hex_to_oklch(value: str) -> tuple[float, float, float]:
+    import math
+
+    r, g, b = (int(value.lstrip("#")[i : i + 2], 16) / 255 for i in (0, 2, 4))
+    r, g, b = _srgb_to_linear(r), _srgb_to_linear(g), _srgb_to_linear(b)
+    lms = (
+        0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+        0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+        0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b,
+    )
+    l_, m_, s_ = (v ** (1 / 3) if v > 0 else -((-v) ** (1 / 3)) for v in lms)
+    lightness = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_
+    a_ = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_
+    b_ = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+    return lightness, math.hypot(a_, b_), math.degrees(math.atan2(b_, a_)) % 360
+
+
+def oklch_to_hex(lightness: float, chroma: float, hue: float) -> str:
+    import math
+
+    a_ = chroma * math.cos(math.radians(hue))
+    b_ = chroma * math.sin(math.radians(hue))
+    l_ = lightness + 0.3963377774 * a_ + 0.2158037573 * b_
+    m_ = lightness - 0.1055613458 * a_ - 0.0638541728 * b_
+    s_ = lightness - 0.0894841775 * a_ - 1.2914855480 * b_
+    lo, mo, so = l_**3, m_**3, s_**3
+    rgb = (
+        4.0767416621 * lo - 3.3077115913 * mo + 0.2309699292 * so,
+        -1.2684380046 * lo + 2.6097574011 * mo - 0.3413193965 * so,
+        -0.0041960863 * lo - 0.7034186147 * mo + 1.7076147010 * so,
+    )
+    out = []
+    for channel in rgb:
+        srgb = _linear_to_srgb(max(0.0, min(1.0, channel)))
+        out.append(max(0, min(255, round(srgb * 255))))
+    return "#{:02x}{:02x}{:02x}".format(*out)
+
+
+def densify(stops: list, per_segment: int = 8) -> list:
+    """Sample the oklch path between token stops into intermediate sRGB stops."""
+    out: list = []
+    for index in range(len(stops) - 1):
+        (c0, o0), (c1, o1) = stops[index], stops[index + 1]
+        l0, ch0, h0 = hex_to_oklch(c0)
+        l1, ch1, h1 = hex_to_oklch(c1)
+        # Shortest way round the hue circle, so a ramp never takes the long path
+        # through unrelated hues.
+        delta = ((h1 - h0 + 180) % 360) - 180
+        for step in range(per_segment + 1):
+            if index and step == 0:
+                continue  # the shared stop is already emitted
+            t = step / per_segment
+            out.append(
+                (
+                    oklch_to_hex(
+                        l0 + (l1 - l0) * t, ch0 + (ch1 - ch0) * t, h0 + delta * t
+                    ),
+                    o0 + (o1 - o0) * t,
+                )
+            )
+    return out
+
+
 def wallpaper_svg(name: str, spec: dict) -> str:
     """A gradient wallpaper as SVG — the source, never a raster (WP-05 Forbidden).
 
@@ -295,22 +383,32 @@ def wallpaper_svg(name: str, spec: dict) -> str:
     x1, y1 = 0.5 - dx / 2, 0.5 - dy / 2
     x2, y2 = 0.5 + dx / 2, 0.5 + dy / 2
     stops = "\n".join(
-        f'      <stop offset="{offset}%" stop-color="{colour}"/>'
-        for colour, offset in spec["stops"]
+        f'      <stop offset="{offset:g}%" stop-color="{colour}"/>'
+        for colour, offset in densify(list(spec["stops"]))
     )
+    # The glows are ELLIPSES: the CSS sizes each glow's box independently in
+    # x and y, and `closest-side` makes the gradient reach transparent at that
+    # box's edges. SVG's radialGradient is circular, so the circle is drawn at
+    # the horizontal radius and scaled vertically about its own centre.
     glow_defs, glow_rects = "", ""
     for index, glow in enumerate(spec.get("glows", [])):
+        cx, cy = glow["cx"] * WALL_W, glow["cy"] * WALL_H
+        rx, ry = glow["rx"] * WALL_W, glow["ry"] * WALL_H
+        k = ry / rx
         glow_defs += (
             f'\n    <radialGradient id="{name}-glow{index}" '
-            f'cx="{glow["cx"]}" cy="{glow["cy"]}" r="{glow["r"]}">\n'
+            f'gradientUnits="userSpaceOnUse" '
+            f'cx="{cx:g}" cy="{cy:g}" r="{rx:g}" '
+            f'gradientTransform="translate(0 {cy * (1 - k):g}) scale(1 {k:g})">\n'
             f'      <stop offset="0%" stop-color="{glow["color"]}" '
-            f'stop-opacity="{glow["opacity"]}"/>\n'
+            f'stop-opacity="{glow["opacity"]:g}"/>\n'
             f'      <stop offset="100%" stop-color="{glow["color"]}" '
             f'stop-opacity="0"/>\n'
             f"    </radialGradient>"
         )
         glow_rects += (
-            f'\n  <rect width="3840" height="2160" fill="url(#{name}-glow{index})"/>'
+            f'\n  <rect width="{WALL_W}" height="{WALL_H}" '
+            f'fill="url(#{name}-glow{index})"/>'
         )
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>

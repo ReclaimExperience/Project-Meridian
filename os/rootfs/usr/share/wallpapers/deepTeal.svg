@@ -5,16 +5,30 @@
   <defs>
     <linearGradient id="deepTeal" x1="0.3290" y1="0.0302" x2="0.6710" y2="0.9698">
       <stop offset="0%" stop-color="#90cacd"/>
+      <stop offset="6.875%" stop-color="#82c1c5"/>
+      <stop offset="13.75%" stop-color="#74b8bd"/>
+      <stop offset="20.625%" stop-color="#66aeb6"/>
+      <stop offset="27.5%" stop-color="#57a5ae"/>
+      <stop offset="34.375%" stop-color="#489ca7"/>
+      <stop offset="41.25%" stop-color="#3893a0"/>
+      <stop offset="48.125%" stop-color="#248a99"/>
       <stop offset="55%" stop-color="#008192"/>
+      <stop offset="60.625%" stop-color="#00798d"/>
+      <stop offset="66.25%" stop-color="#007088"/>
+      <stop offset="71.875%" stop-color="#006883"/>
+      <stop offset="77.5%" stop-color="#005f7d"/>
+      <stop offset="83.125%" stop-color="#005777"/>
+      <stop offset="88.75%" stop-color="#004f71"/>
+      <stop offset="94.375%" stop-color="#00476b"/>
       <stop offset="100%" stop-color="#003f64"/>
     </linearGradient>
-    <radialGradient id="deepTeal-glow0" cx="0.16" cy="0.1" r="0.68">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.3"/>
+    <radialGradient id="deepTeal-glow0" gradientUnits="userSpaceOnUse" cx="768" cy="324" r="1152" gradientTransform="translate(0 111.375) scale(1 0.65625)">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.2"/>
       <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="deepTeal-glow1" cx="0.88" cy="0.86" r="0.74">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    <radialGradient id="deepTeal-glow1" gradientUnits="userSpaceOnUse" cx="3072" cy="1944" r="1344" gradientTransform="translate(0 694.286) scale(1 0.642857)">
+      <stop offset="0%" stop-color="#785ac8" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#785ac8" stop-opacity="0"/>
     </radialGradient>
   </defs>
   <rect width="3840" height="2160" fill="url(#deepTeal)"/>

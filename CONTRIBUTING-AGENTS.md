@@ -79,6 +79,28 @@ You are one agent executing exactly one work package (or one clearly-named slice
   as an open question with a name. A passing remark is not a record, and the
   next session will not find it.
 
+- **R-K: "Spec over mockup" governs under-specification, not divergence.** The
+  written spec is authoritative for everything the mockup does not pin down —
+  behaviour, edge cases, the hundred decisions a picture cannot express. It does
+  **not** license the shipped result to look different from what the mockup
+  visibly renders.
+
+  Where the ground visibly departs from the mockup, the mockup is the intent and
+  the *tokens* are what gets corrected, because the tokens were extracted from
+  the mockup to serve it, not to overrule it. A mismatch of that kind is
+  **extraction infidelity** — a transcription error somewhere between the design
+  and `tokens.json` — and treating it as an authority conflict resolves it in
+  favour of the mistake.
+
+  It has already happened twice in WP-05. PRD 4.2 said the wallpaper's glows
+  were "theme-neutral"; the mockup's CSS says the lower-right one is
+  `rgba(120,90,200,0.22)`, violet. The spec line was the error. Reading it as
+  authority produced a white glow that matched nothing.
+
+  The test to apply: *does the spec contradict something the mockup actually
+  shows, or does it decide something the mockup is silent about?* Only the
+  second is authority.
+
 ### 14.4 Context discipline (you are an Opus 5 medium agent; budget accordingly)
 Load only listed inputs; grep before reading whole files; summarize long tool output into your working notes instead of re-reading; if context tightens, STOP at a clean commit + STATUS.md "Open threads" + hand off rather than degrading quality. An L-size WP expects 5–8 sessions — plan your slice to land something verified each session.
 

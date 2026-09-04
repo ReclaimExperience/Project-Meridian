@@ -80,13 +80,14 @@
       "type": "array",
       "minItems": 1,
       "maxItems": 4,
-      "description": "Radial overlays layered over the linear gradient. The mockup's desktop is not a bare gradient: two soft radial glows give it depth and most of its warmth, and without them the wallpaper reads flatter and cooler.",
+      "description": "Radial overlays layered over the linear ramp, as the mockup authors them: a white glow from the top-left and a violet one from the bottom-right. Elliptical, because the CSS source sizes each glow's box independently in x and y (closest-side). Not theme-neutral: the violet is the mockup's own, and each wallpaper is a composed asset rather than a shared treatment.",
       "items": {
         "type": "object",
         "required": [
           "cx",
           "cy",
-          "r",
+          "rx",
+          "ry",
           "color",
           "opacity"
         ],
@@ -101,10 +102,6 @@
             "minimum": -1,
             "maximum": 2
           },
-          "r": {
-            "type": "number",
-            "exclusiveMinimum": 0
-          },
           "color": {
             "type": "string",
             "pattern": "^#[0-9a-fA-F]{6}$"
@@ -113,6 +110,14 @@
             "type": "number",
             "minimum": 0,
             "maximum": 1
+          },
+          "rx": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "ry": {
+            "type": "number",
+            "exclusiveMinimum": 0
           }
         }
       }
