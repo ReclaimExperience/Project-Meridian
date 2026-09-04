@@ -28,7 +28,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-MOCKUP = ROOT / "docs/design/mockup/Meridian OS.dc.html"
+MOCKUP_DIR = ROOT / "docs/design/mockup"
+# Globbed, not named: the file carries the product name, and hardcoding that
+# here is what tests/lint/branding.sh exists to stop.
+_CANVASES = sorted(MOCKUP_DIR.glob("*.dc.html"))
+MOCKUP = _CANVASES[0] if _CANVASES else MOCKUP_DIR / "missing.dc.html"
 TOKENS = ROOT / "docs/design/tokens.json"
 
 NAMES = {"Soft violet": "softViolet", "Dusk": "dusk", "Deep teal": "deepTeal"}
