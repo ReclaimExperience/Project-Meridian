@@ -1,0 +1,28 @@
+# Breeze decoration and widget tuning (PRD §4.3, WP-05).
+#
+# Configuration only — no patched Breeze, no forked source. WP-05's Forbidden
+# list rules out forking Breeze wholesale, and everything here is a supported key.
+[Common]
+# The close button gets an outline so its hover state reads as deliberate rather
+# than as an accident of the colour scheme. The hover COLOUR itself comes from
+# the scheme's ForegroundNegative, which the generator sets to the token
+# color.system.closeHover (#e5484d) — so the spec value arrives through tokens
+# rather than being written twice.
+OutlineCloseButton=true
+ShadowSize=ShadowVeryLarge
+ShadowStrength=90
+
+[Windeco]
+# No gradient: the mockup's titlebar is a flat surface, and a gradient is the
+# most obvious way stock Breeze announces itself as stock Breeze.
+DrawBackgroundGradient=false
+DrawTitleBarSeparator=false
+DrawBorderOnMaximizedWindows=false
+TitleAlignment=AlignLeft
+ButtonSize=ButtonDefault
+
+[Style]
+# Animations exist but are quick. PRD 4.6: the machine should feel calm, which
+# means responsive, not decorated.
+AnimationsEnabled=true
+AnimationSteps=10

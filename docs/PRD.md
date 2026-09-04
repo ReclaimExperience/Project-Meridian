@@ -337,6 +337,8 @@ Pages, in order, each skippable: 1) **Hello** (three-point promise per mockup mo
 6. Store "Popular with switchers" Spotify subtitle "Music streaming" retained but Spotify sits in catalog, not preinstalled.
 7. Quick Settings gains an MPRIS now-playing row (switcher expectation; mockup silent on it).
 8. Workspaces: exactly 3 fixed numbered spaces in 1.0 (no add/remove UI; power users get KWin shortcuts; revisit v1.x).
+9. **App windows are opaque.** The mockup shows faintly translucent app windows (the 94% Files window). QtWidgets backgrounds are opaque, so per-app translucency fights the toolkit for a low-salience gain — approximated opaque and accepted. The mockup's material (94% surfaces over blur) is native only to **panels and Plasma popups**, where it is delivered by the Plasma Style SVGs plus the KWin blur effect: Start menu, Quick Settings, taskbar (WP-07/08/09). Colour schemes carry no alpha at all, and that is correct rather than lossy — KDE widget and window backgrounds are opaque, so the flattened value *is* the value.
+10. **Blur is a known environment variable, pinned before it becomes a mystery diff.** A VM may render the KWin blur effect differently, or not at all, so a screenshot diff against a blur-on mockup can be environmental rather than a defect — the same trap as measuring idle RAM without a GPU (ADR-017). Therefore, once blurred surfaces exist (WP-07): the **regression baseline** is captured in a deterministic blur state, and the **fidelity-vs-mockup review** is done on a true blur-on still. Two different pictures for two different questions; decided here, not discovered later.
 
 ---
 

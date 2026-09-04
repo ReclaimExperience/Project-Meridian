@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Generate KDE colour schemes from docs/design/tokens.json (ADR-003, PRD §4.2).
+"""Generate the theme's token-derived files from docs/design/tokens.json.
+
+Colour schemes (PRD §4.2), kdeglobals defaults and the fontconfig family chain
+(§4.1) — everything whose values come from tokens. ADR-003.
 
 The schemes are GENERATED, never hand-edited. tokens.json is the contract — PRD
 §4 calls it "the human contract" with Appendix A machine-readable — and a
@@ -42,7 +45,8 @@ BRANDING = ROOT / "os" / "rootfs" / "usr" / "share" / "meridian" / "branding.jso
 # shell/theme/ and copy at build time — would put two copies of the same artifact
 # in the repo and give them a chance to disagree. The GENERATOR lives in
 # shell/theme/ as PRD 6.1 intends; its output lives where KDE will read it.
-OUT = ROOT / "os" / "rootfs" / "usr" / "share" / "color-schemes"
+ROOTFS = ROOT / "os" / "rootfs"
+OUT = ROOTFS / "usr" / "share" / "color-schemes"
 
 RGBA = re.compile(
     r"rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)"
@@ -175,6 +179,85 @@ def scheme(tokens: dict, theme: str, brand: str) -> str:
     )
 
 
+def kdeglobals(tokens: dict, brand: str) -> str:
+    """Session defaults that come from tokens (PRD §4.1, §4.6).
+
+    The font stack is the token list verbatim, so fontconfig and Qt agree on the
+    order. `single-click = false` is a switcher decision, not a taste one: double
+    click is what Windows taught these users, and PRD §4.6 fixes it.
+    """
+    font = tokens["font"]
+    ui = font["ui"][0]
+    mono = font["mono"][0]
+    body = font["size"]["body"]
+
+    # KDE font entries: family,size,weight-ish,italic,weight,...  The trailing
+    # fields are Qt's; only family and size are ours to set from tokens.
+    def entry(family: str, size: float, weight: int = 400) -> str:
+        return f"{family},{size:g},-1,5,{weight},0,0,0,0,0"
+
+    return "\n".join(
+        [
+            "# GENERATED FROM docs/design/tokens.json — DO NOT EDIT.",
+            "# Regenerate with `just assets`.",
+            "",
+            "[General]",
+            f"ColorScheme={brand}Light",
+            f"font={entry(ui, body)}",
+            f"fixed={entry(mono, body - 1)}",
+            f"menuFont={entry(ui, body)}",
+            f"smallestReadableFont={entry(ui, font['size']['overline'])}",
+            f"toolBarFont={entry(ui, font['size']['caption'])}",
+            "widgetStyle=Breeze",
+            "",
+            "[KDE]",
+            # Double-click, because that is what Windows taught them (PRD 4.6).
+            "SingleClick=false",
+            "AnimationDurationFactor=0.5",
+            "",
+            "[Icons]",
+            "Theme=breeze",
+            "",
+            "[WM]",
+            f"activeFont={entry(ui, font['size']['secondary'], 600)}",
+            "",
+        ]
+    )
+
+
+def fontconfig(tokens: dict) -> str:
+    """The family chain, in the token order (PRD §4.1).
+
+    Written as fontconfig preferences rather than aliases so a missing family
+    falls through to the next rather than resolving to whatever fontconfig
+    guesses. The order is the contract: Schibsted Grotesk, then Inter, then Noto
+    Sans — and if the first is not installed the second renders, which is a
+    visible difference the theme review is expected to catch.
+    """
+    ui = tokens["font"]["ui"]
+    mono = tokens["font"]["mono"]
+    prefer = "\n".join(f"      <family>{f}</family>" for f in ui)
+    prefer_mono = "\n".join(f"      <family>{f}</family>" for f in mono)
+    return f"""<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<!-- GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`. -->
+<fontconfig>
+  <alias>
+    <family>sans-serif</family>
+    <prefer>
+{prefer}
+    </prefer>
+  </alias>
+  <alias>
+    <family>monospace</family>
+    <prefer>
+{prefer_mono}
+    </prefer>
+  </alias>
+</fontconfig>
+"""
+
+
 def main(argv: list[str] | None = None) -> int:
     # --out lets the staleness lint regenerate into a scratch tree and diff,
     # driving THIS file rather than a rewritten copy of it. A check that tests a
@@ -187,6 +270,24 @@ def main(argv: list[str] | None = None) -> int:
     for theme in ("light", "dark"):
         path = out / f"{brand}{theme.capitalize()}.colors"
         path.write_text(scheme(tokens, theme, brand))
+        try:
+            shown = path.relative_to(ROOT)
+        except ValueError:
+            shown = path
+        print(f"  wrote {shown}")
+
+    # Session defaults and the font chain live outside the color-schemes dir, so
+    # they follow --out only when it is the real rootfs; the staleness lint
+    # compares the whole set.
+    extra = {
+        Path(str(out).replace("usr/share/color-schemes", "etc/xdg"))
+        / "kdeglobals": kdeglobals(tokens, brand),
+        Path(str(out).replace("usr/share/color-schemes", "etc/fonts/conf.d"))
+        / "60-meridian-families.conf": fontconfig(tokens),
+    }
+    for path, content in extra.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
         try:
             shown = path.relative_to(ROOT)
         except ValueError:

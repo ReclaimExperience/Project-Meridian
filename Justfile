@@ -508,7 +508,7 @@ perf budget="" arch="":
 # tests/lint/theme_generated.py fails if a committed artifact has drifted, so
 # this is how you fix that — never by editing the generated file.
 assets:
-    @python3 shell/theme/generate-color-schemes.py
+    @python3 shell/theme/generate-theme.py
 
 # -------------------------------------------------------------------- iso ---
 

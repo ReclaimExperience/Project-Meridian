@@ -21,8 +21,16 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-GENERATOR = ROOT / "shell" / "theme" / "generate-color-schemes.py"
-COMMITTED = ROOT / "os" / "rootfs" / "usr" / "share" / "color-schemes"
+GENERATOR = ROOT / "shell" / "theme" / "generate-theme.py"
+ROOTFS = ROOT / "os" / "rootfs"
+# Every path the generator writes. Listed rather than globbed: a generated file
+# that stops being generated should fail here, not quietly stop being checked.
+GENERATED = (
+    "usr/share/color-schemes/MeridianLight.colors",
+    "usr/share/color-schemes/MeridianDark.colors",
+    "etc/xdg/kdeglobals",
+    "etc/fonts/conf.d/60-meridian-families.conf",
+)
 
 
 def main() -> int:
@@ -40,18 +48,33 @@ def main() -> int:
             print("      " + (result.stdout + result.stderr).strip()[:400])
             return 1
 
-        expected = sorted(p.name for p in out.glob("*.colors"))
-        actual = sorted(p.name for p in COMMITTED.glob("*.colors"))
-        if expected != actual:
-            print(f"  FAIL  generator produces {expected}, repo has {actual}")
-            return 1
-
-        print("generated colour schemes match tokens.json")
-        for name in expected:
-            if filecmp.cmp(out / name, COMMITTED / name, shallow=False):
-                print(f"  ok    {name}")
+        print("generated theme files match tokens.json")
+        for relative in GENERATED:
+            # The generator mirrors --out for the non-colour files by string
+            # substitution, so reconstruct the same way.
+            produced = Path(
+                str(out / relative.split("/")[-1])
+                if relative.startswith("usr/share/color-schemes")
+                else str(out).replace(
+                    "usr/share/color-schemes", relative.rsplit("/", 1)[0]
+                )
+                + "/"
+                + relative.rsplit("/", 1)[1]
+            )
+            committed = ROOTFS / relative
+            if not committed.exists():
+                print(
+                    f"  FAIL  {relative} is not committed, but the generator writes it."
+                )
+                failures += 1
+            elif not produced.exists():
+                print(f"  FAIL  the generator no longer writes {relative}, but it is")
+                print("      committed — so nothing checks it any more.")
+                failures += 1
+            elif filecmp.cmp(produced, committed, shallow=False):
+                print(f"  ok    {relative}")
             else:
-                print(f"  FAIL  {name} is STALE — tokens.json has moved on.")
+                print(f"  FAIL  {relative} is STALE — tokens.json has moved on.")
                 print("      Run `just assets` and commit the result. The palette")
                 print("      drifting from the design is invisible until someone")
                 print("      compares a screenshot to the mockup.")
@@ -61,7 +84,7 @@ def main() -> int:
     if failures:
         print(f"theme-generated: {failures} stale file(s)")
         return 1
-    print(f"theme-generated: {len(expected)} file(s) match their generator")
+    print(f"theme-generated: {len(GENERATED)} file(s) match their generator")
     return 0
 
 

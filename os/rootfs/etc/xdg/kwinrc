@@ -1,0 +1,29 @@
+# Window manager defaults (PRD §4.3, WP-05).
+#
+# Buttons on the RIGHT, in Windows order: minimise, maximise, close. That is
+# what a switcher's hand already knows, and PRD §4.3 fixes it. The letters are
+# KWin's button codes — M is the menu, I minimise, A maximise, X close.
+#
+# Decoration is Breeze, configured rather than replaced. ADR/PRD priority is
+# config > Aurorae > minimal patch > never fork KWin, and Aurorae is not even
+# installed in this image — it is also the engine KDE is moving away from, which
+# is what the PRD's "[VERIFY] Aurorae status changed across Plasma 6.x" was
+# pointing at. Titlebar geometry is the surface where mockup fidelity matters
+# least and maintainability matters most: every Plasma bump touches decorations.
+[org.kde.kdecoration2]
+library=org.kde.breeze
+theme=Breeze
+ButtonsOnLeft=M
+ButtonsOnRight=IAX
+BorderSize=None
+BorderSizeAuto=false
+
+[Windows]
+# Focus follows the click, like Windows. Not a taste call.
+FocusPolicy=ClickToFocus
+
+[Compositing]
+# The blur effect that the mockup's material depends on (PRD 4.3). It applies to
+# panels and Plasma popups, which are WP-07/08/09's surfaces — nothing in WP-05
+# is translucent, and that is correct rather than incomplete (5.12 item 9).
+Enabled=true
