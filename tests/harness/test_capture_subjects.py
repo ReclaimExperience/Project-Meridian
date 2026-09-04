@@ -92,10 +92,16 @@ def main() -> int:
             failures += 1
 
         # A stand-in for the base image's wallpaper: nothing like our palette.
-        foreign = gradient(tmp, "foreign", [(20, 90, 30), (240, 200, 60), (250, 120, 10)])
-        near_foreign = min(nearest_distance(c, STOPS) for c in dominant_colours(foreign))
+        foreign = gradient(
+            tmp, "foreign", [(20, 90, 30), (240, 200, 60), (250, 120, 10)]
+        )
+        near_foreign = min(
+            nearest_distance(c, STOPS) for c in dominant_colours(foreign)
+        )
         if near_foreign <= 90:
-            print(f"FAIL: a foreign wallpaper passed as ours (distance {near_foreign:.0f})")
+            print(
+                f"FAIL: a foreign wallpaper passed as ours (distance {near_foreign:.0f})"
+            )
             failures += 1
 
     if failures:

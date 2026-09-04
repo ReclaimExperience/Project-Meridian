@@ -58,12 +58,33 @@ SESSION_ENV = f". {SESSION_ENV_FILE}"
 
 
 def _capture_session_env(console) -> None:
-    """Snapshot the running session's environment, or fail saying why."""
+    """Snapshot the FULL session environment, or fail saying why.
+
+    It used to take four variables — WAYLAND_DISPLAY, XDG_RUNTIME_DIR, DISPLAY,
+    DBUS_SESSION_BUS_ADDRESS — on the reasoning that those are what a GUI
+    command needs to reach the compositor. They are what it needs to *draw*. They
+    are not what it needs to look right.
+
+    Missing from that set was XDG_CURRENT_DESKTOP=KDE, which is how Qt6 selects
+    the KDE platform theme, which is what reads the colour scheme out of
+    kdeglobals. Dolphin launched without it rendered a white interior under a
+    dark scheme that was correctly applied and correctly written to config — and
+    the compare sheet showed a "dark" window that was light inside. The harness
+    was the defect, and it looked exactly like a theming defect.
+
+    So: take the whole environment, quoted properly, and assert the variable
+    that decides theming is in it. Launching an app with less than the session
+    gives it is not testing the app the user runs.
+    """
     _s, out = console.run(
         "pid=$(pgrep -u $(id -un) -x plasmashell | head -1); "
-        f"tr '\\0' '\\n' < /proc/$pid/environ 2>/dev/null "
-        "| grep -aE '^(WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DISPLAY|DBUS_SESSION_BUS_ADDRESS)=' "
-        f"| sed 's/^/export /' > {SESSION_ENV_FILE}; "
+        "tr '\\0' '\\n' < /proc/$pid/environ 2>/dev/null | "
+        "while IFS= read -r line; do "
+        "key=${line%%=*}; val=${line#*=}; "
+        "case \"$key\" in ''|*[!A-Za-z0-9_]*) continue;; esac; "
+        'printf "export %s=\'%s\'\\n" "$key" '
+        "\"$(printf '%s' \"$val\" | sed \"s/'/'\\\\''/g\")\"; "
+        f"done > {SESSION_ENV_FILE}; "
         f"echo VARS=$(grep -c . {SESSION_ENV_FILE} 2>/dev/null || echo 0)",
         timeout=90,
     )
@@ -71,16 +92,33 @@ def _capture_session_env(console) -> None:
     match = re.search(r"VARS=(\d+)", out)
     if match:
         count = int(match.group(1))
-    if count < 2:
+    if count < 10:
         raise AssertionError(
             "could not capture the session environment from plasmashell "
-            f"(found {count} variable(s)).\n"
-            f"  guest said: {out.strip()[:200]!r}\n"
-            "  Without WAYLAND_DISPLAY and XDG_RUNTIME_DIR every GUI command "
-            "fails with 'could not connect to display', and the frames would be "
-            "of a session that never changed."
+            f"(found {count} variable(s), expected the session's full set).\n"
+            f"  guest said: {out.strip()[:200]!r}"
         )
-    print(f"theme: captured session environment ({count} variables)")
+    _s, check = console.run(
+        f"{SESSION_ENV}; echo DESKTOP=[$XDG_CURRENT_DESKTOP] "
+        "RUNTIME=[$XDG_RUNTIME_DIR] WAYLAND=[$WAYLAND_DISPLAY]",
+        timeout=60,
+    )
+    if "DESKTOP=[KDE]" not in check.upper().replace("PLASMA", "KDE"):
+        raise AssertionError(
+            "XDG_CURRENT_DESKTOP is not in the captured session environment.\n"
+            f"  guest said: {check.strip()[:200]!r}\n"
+            "  Qt6 selects the KDE platform theme from it, and the platform "
+            "theme is what applies the colour scheme to app interiors. Without "
+            "it every app renders light under a correctly applied dark theme, "
+            "and the sheet blames the theme."
+        )
+    if "RUNTIME=[]" in check or "WAYLAND=[]" in check:
+        raise AssertionError(
+            f"the session environment is missing display variables: {check.strip()[:200]!r}"
+        )
+    print(
+        f"theme: captured session environment ({count} variables, XDG_CURRENT_DESKTOP present)"
+    )
 
 
 def _capture(vm: VM, name: str, theme: str, disturb: bool = True) -> None:
