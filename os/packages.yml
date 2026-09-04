@@ -59,22 +59,6 @@ add:
   - greenboot                    # boot health checks -> automatic rollback
   - greenboot-default-health-checks
 
-  # --- theming substrate (WP-05) -------------------------------------------
-  # Both approved by the owner after the WP-05 compare sheet.
-  - breeze                 # The Qt widget style. `widgetStyle=Breeze` has been
-                           # in our kdeglobals since WP-05 began while the style
-                           # itself was absent from the image — selected but not
-                           # installed, which is R-I's inversion and just as
-                           # silent: Qt falls back without saying anything, and
-                           # every app draws in a style we did not choose.
-  - breeze-gtk             # Layer 3 of the dark contract (docs/design/theming.md).
-                           # kde-gtk-config already writes
-                           # gtk-application-prefer-dark-theme=true, so the
-                           # preference was set with no theme to apply it. This
-                           # is the mechanism a dark Firefox depends on, and
-                           # Firefox is a Flatpak (ADR-004/ADR-010) that arrives
-                           # via the ISO sideload set, not this image.
-
 # Packages removed from the base image.
 #
 # Two kinds: things an ADR forbids, and things PRD 3.2 leaves out. Both are
@@ -189,6 +173,22 @@ protect:
                             # ADR-004 makes every app a Flatpak, so losing this
                             # breaks the entire app set at once.
   - flatpak            # ADR-004: the store and every app in it.
+
+  # --- the theming substrate (WP-05) ---------------------------------------
+  # These were already in the base image the whole time. An `rpm -q breeze` and
+  # `rpm -q breeze-gtk` both answered "not installed", and that was read as
+  # them being absent — but neither is a package NAME in Fedora 44. The Qt
+  # widget style is `plasma-breeze`; the GTK theme is split across
+  # `breeze-gtk-gtk3` / `breeze-gtk-gtk4`. Adding the invented names to
+  # `add:` would have failed the build on a package dnf cannot resolve.
+  #
+  # So they are protected rather than added: the owner's intent — never ship a
+  # widgetStyle we do not also ship the style for — is enforced against a
+  # future de-bloat, without pretending we installed something.
+  - plasma-breeze      # The Qt widget style. `widgetStyle=Breeze` in our
+                       # kdeglobals is only meaningful while this is here.
+  - breeze-gtk-gtk3    # Layer 3 of the dark contract: the GTK theme that
+  - breeze-gtk-gtk4    # kde-gtk-config's prefer-dark preference applies.
 
   # --- capabilities ADR-017 clause 4 forbids trading for RAM ----------------
   #
