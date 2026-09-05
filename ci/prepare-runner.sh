@@ -66,10 +66,18 @@ sudo mount --bind "${STORAGE_ROOT}/storage-root" /var/lib/containers/storage
 sudo mkdir -p /etc/containers
 sudo tee /etc/containers/storage-root.conf >/dev/null <<CONF
 [storage]
-# NO driver line. Naming it "overlay" here made podman refuse the store with
-#   database graph driver "" does not match our graph driver "overlay"
-# because the store's database had never recorded one. Say only what needs
-# saying — the paths — and let podman detect the rest.
+# The driver line stays. Runs 33947223804 and 33949149449 both built the qcow2
+# successfully WITH it — those are the only two successful disk builds this
+# project has ever had. It was removed after a single failure
+# (database graph driver "" does not match our graph driver "overlay"), and
+# removing it brought back the original static-dir mismatch, which is worse and
+# is the failure this whole config exists to prevent.
+#
+# The driver-mismatch run is unexplained and recorded as such: it most likely
+# hit a store that had never been initialised, since the preceding job step had
+# already failed. That is a hypothesis, not a finding. Do not remove this line
+# again without evidence stronger than one red run.
+driver = "overlay"
 graphroot = "/var/lib/containers/storage"
 runroot = "/run/containers/storage"
 CONF
