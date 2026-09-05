@@ -252,15 +252,34 @@ class Console:
 
         deadline = _time.monotonic() + timeout
         last = ""
+        slow = 0
         while _time.monotonic() < deadline:
-            _status, last = self.run(command, timeout=min(60.0, timeout))
+            # A command that does not answer in time is "not yet", not "give
+            # up". This used to let a single slow reply raise straight out of
+            # the wait: a `systemctl is-active` call took >60s while the
+            # machine was busy bringing up a desktop under llvmpipe, and a
+            # 420-second wait died at 60 with a message about a command
+            # timeout. It read as the machine having rebooted, and was
+            # reported as one. A polling primitive that cannot tolerate a slow
+            # poll is not a polling primitive.
+            remaining = deadline - _time.monotonic()
+            try:
+                _status, last = self.run(
+                    command, timeout=max(15.0, min(90.0, remaining))
+                )
+            except ConsoleError as exc:
+                slow += 1
+                last = f"(no reply within the per-poll budget: {exc})"
+                _time.sleep(poll)
+                continue
             if predicate(last):
                 return last
             _time.sleep(poll)
         raise ConsoleError(
             f"timed out after {timeout:.0f}s waiting for "
             f"{description or predicate!r} via {command!r}.\n"
-            f"  last output: {last.strip()[:400]!r}"
+            f"  last output: {last.strip()[:400]!r}\n"
+            f"  polls that got no reply in time: {slow}"
         )
 
     def run(self, command: str, timeout: float = 60.0) -> tuple[int, str]:
