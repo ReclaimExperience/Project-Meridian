@@ -1120,3 +1120,27 @@ boots again; the defect is untouched and the disk will drift back.
   overlay so no run can poison the next. **Not yet done.**
 - `VM.stop()` leaked a `qemu-system-x86_64` holding the disk's write lock, which
   presented as an unrelated "Failed to get write lock". **Not yet fixed.**
+
+---
+
+## WP-05 icon theme: parked mid-diagnosis (2026-09-04)
+
+The `meridian` icon theme applies and the accent folder set visibly replaces
+Breeze's, but **every non-overridden icon loses contrast** — Dolphin's toolbar
+renders near-black on near-black. A `Theme=breeze` control frame is bright, so
+the regression is ours and not the dark scheme, focus state, or anything
+ambient.
+
+Cause, established: **`index.theme` lands as a 0-byte file in the guest**
+(`BYTES=0`), so KDE never reads `Inherits=breeze,hicolor`. Non-overridden icons
+are therefore not inherited-and-recoloured. The file is correct at source — 396
+bytes, git-tracked, correct `[Icon Theme]` header, present on the build box —
+so the fault is in the push/extract path used to install it into a running VM,
+not in the generator.
+
+`FollowsColorScheme=true` was my hypothesis and is **not** the fix: Breeze does
+declare it, but ours was never read at all. Recorded so nobody adds the key and
+believes it fixed something.
+
+**Not verified, therefore not claimed:** that the icon theme works when it is
+part of a built image rather than hand-installed. That needs the CI qcow2.
