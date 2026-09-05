@@ -115,12 +115,33 @@ def run(vm: VM, credentials: dict) -> None:
     user, password = credentials["user"], credentials["password"]
     results = []
 
-    # PREVENTION first, on the boot we already have: a healthy boot must give
-    # a life back. Everything below tests recovery from a machine that already
-    # ran out of them.
+    # ---------------------------------------------------------- prevention --
+    #
+    # ARM the counter first. Reading grubenv on a machine that already has
+    # boot_success=1 proves nothing: it passes whether greenboot reset it this
+    # boot or it happened to be sitting that way already. The first version of
+    # this check did exactly that and passed trivially.
+    #
+    # /boot is read-only from userspace — that is half of why a bricked machine
+    # cannot heal itself — so the counter is armed from the GRUB command line,
+    # which is the only writer available before Linux is up.
+    print("bootfloor: arming a boot counter, then booting healthy")
+    _at_grub(console)
+    for command in (
+        "set boot_counter=3",
+        "set boot_success=0",
+        "save_env boot_counter boot_success",
+        "boot",
+    ):
+        console.send(command + "\n")
+        time.sleep(1.2)
+
     console.login(user, password, timeout=600)
     _assert_counter_resets(console)
+    console.send_line("sudo -n systemctl reboot")
+    time.sleep(5)
 
+    # ---------------------------------------------------------------- cure --
     for name, commands in CORRUPTIONS:
         print(f"bootfloor: applying '{name}'")
         _at_grub(console)
@@ -141,12 +162,6 @@ def run(vm: VM, credentials: dict) -> None:
             print(f"bootfloor: FAIL — '{name}' left the machine unbootable")
             break
 
-        # Put it back to a sane state before the next case, so a failure is
-        # attributable to the corruption under test and not to the last one.
-        console.run(
-            "sudo -n grub2-editenv /boot/grub2/grubenv set boot_success=1 2>&1 || true",
-            timeout=90,
-        )
         console.send_line("sudo -n systemctl reboot")
         time.sleep(5)
 
