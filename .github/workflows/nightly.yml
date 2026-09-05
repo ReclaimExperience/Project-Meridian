@@ -102,7 +102,15 @@ jobs:
       - uses: actions/checkout@v5
       - uses: extractions/setup-just@v3
       - name: Install build tools
-        run: sudo apt-get install -y -qq qemu-system-x86 ovmf skopeo
+        run: |
+          sudo apt-get install -y -qq qemu-system-x86 ovmf skopeo
+          # The harness imports numpy and pillow for frame analysis. This job
+          # did not install them, so every rollback drill died on
+          # `ModuleNotFoundError: No module named 'numpy'` AFTER a full image
+          # build — ten minutes spent to fail on a missing dependency. Same
+          # class as the lint job that lacked pillow.
+          python3 -m pip install --quiet --break-system-packages \
+            jsonschema PyYAML pillow numpy
       - name: Prepare runner storage
         run: bash ci/prepare-runner.sh
       - name: Log in to GHCR
