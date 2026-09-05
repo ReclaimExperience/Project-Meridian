@@ -103,6 +103,40 @@ def _assert_greenboot_live(console) -> None:
         )
 
 
+def _await_greenboot(console, timeout: float = 420.0) -> None:
+    """Let the health check FINISH before judging what it did.
+
+    greenboot runs asynchronously. The console is ready long before the check
+    is: it polls for a usable desktop, which on this image takes ~80s, and only
+    then does anything write boot_success. Reading grubenv at login therefore
+    always sees boot_success=0 and a counter not yet returned — and reports the
+    accretion defect on a machine that is about to behave perfectly.
+
+    That is a race in the TEST, and it produced a convincing false positive:
+    counter 3 -> 2, boot_success 0, exactly the real defect's signature.
+    """
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        _s, out = console.run(
+            "systemctl show -p ActiveState -p SubState --value "
+            "greenboot-healthcheck.service 2>&1 | tr '\\n' '/'",
+            timeout=90,
+        )
+        last = out.strip()
+        # activating/start means it is still polling; anything settled is done.
+        if "activating" not in last and "start" not in last:
+            print(f"bootfloor: greenboot settled at {last[-40:]!r}")
+            return
+        time.sleep(10)
+    raise AssertionError(
+        f"greenboot-healthcheck never finished within {timeout:.0f}s "
+        f"(last state {last[-60:]!r}). A health check that never completes "
+        "cannot confirm a boot, so the counter is never returned — which is "
+        "the accretion path to an unbootable machine."
+    )
+
+
 def _assert_counter_resets(console) -> None:
     """A healthy boot must clear the boot counter.
 
@@ -171,6 +205,7 @@ def run(vm: VM, credentials: dict) -> None:
 
     console.login(user, password, timeout=600)
     _assert_greenboot_live(console)
+    _await_greenboot(console)
     _assert_counter_resets(console)
     console.send_line("sudo -n systemctl reboot")
     time.sleep(5)
