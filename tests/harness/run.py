@@ -47,6 +47,9 @@ SUITES = (
     # fallback deployment exists; this proves the machine still boots when
     # one does not.
     "bootfloor",
+    # Produces the number PRD 10.2's Boot->greeter column wants, which the
+    # greenboot deadline must be derived from rather than guessed.
+    "boottime",
     "theme",
 )
 

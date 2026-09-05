@@ -172,6 +172,13 @@ jobs:
           retention-days: 5
           if-no-files-found: error
 
+      # Runs BEFORE the drill, which mutates boot state. Measures the number
+      # the greenboot deadline has to come from, on the image just built —
+      # in CI, because that is where a fresh image and its per-build
+      # credentials already sit together.
+      - name: Boot timing
+        run: python3 tests/harness/run.py boottime --arch x86_64
+
       - name: Rollback drill
         run: bash ci/rollback-drill.sh x86_64
       - name: Upload drill evidence
