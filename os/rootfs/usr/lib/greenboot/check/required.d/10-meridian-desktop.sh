@@ -60,24 +60,38 @@ if systemctl is-failed --quiet display-manager.service; then
     fail "the display manager entered a failed state."
 fi
 
-# 3. Nothing in the graphical stack FAILED.
+# 3. The graphical stack actually came up.
 #
-#    Read this next to check 1, because the pair is the whole lesson. The
-#    original check WAITED for graphical.target to go active, on a deadline
-#    tighter than the target's own worst case — that is what bricked machines.
-#    The first fix removed the target from the check altogether, and that
-#    removed the only thing the rollback drill's sabotage trips: the sabotage
-#    fails a unit RequiredBy=graphical.target while plasmalogin keeps serving a
-#    greeter perfectly well. greenboot passed the boot and marked it good.
+#    This is the ORIGINAL check, restored, and the story is worth keeping
+#    because two corrections in a row aimed at the wrong half of it.
 #
-#    Waiting for a target to ACTIVATE and asking whether it FAILED are
-#    different questions. The first is a race against slow hardware. The second
-#    is a fact, available immediately, and it is the one that matters.
-if systemctl is-failed --quiet graphical.target; then
-    fail "graphical.target is in a failed state. Something the desktop is
-      built on did not come up, and this update should not be kept."
-fi
-echo "greenboot: graphical.target has not failed"
+#    The original waited for graphical.target to go active on a 90s deadline.
+#    The target clears at ~80s here, so it was a coin toss, and every lost toss
+#    spent a boot attempt until a machine had none left. Correct diagnosis:
+#    THE DEADLINE was too tight. My first fix instead deleted the target check
+#    and asserted only the greeter — which the rollback drill's sabotage does
+#    not disturb, so a sabotaged boot passed and greenboot kept a broken
+#    update. My second fix asked `is-failed graphical.target`, which is FALSE
+#    for a target that never activated at all: unreached is `inactive`, not
+#    `failed`. The sabotage prevents activation; it produces no failure state
+#    to find. That passed too.
+#
+#    So: wait for it, generously. Waiting is correct; the old deadline was not.
+#    NetworkManager-wait-online is masked (see the note beside that mask), which
+#    is what makes the target arrive promptly instead of at the ~80s mark.
+elapsed=0
+until systemctl is-active --quiet graphical.target; do
+    if [[ "$elapsed" -ge "$DEADLINE" ]]; then
+        fail "graphical.target did not come up within ${DEADLINE}s. Something
+      the desktop is built on did not start, and this update should not be
+      kept. (If a healthy machine ever trips this, the deadline is wrong —
+      raise it from PRD 10.2's measured column. Do NOT delete the check: that
+      was tried, and it let a sabotaged boot pass.)"
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+done
+echo "greenboot: graphical.target active after ${elapsed}s"
 
 # 4. Networking CAN start. NOT "is connected", and not "can resolve": a desktop
 #    with no cable and no saved Wi-Fi is healthy, and rolling that machine back
