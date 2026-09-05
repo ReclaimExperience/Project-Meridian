@@ -51,6 +51,43 @@ SUITES = (
 )
 
 
+# Suites that MUST NOT write to the golden disk. `bootfloor` deliberately
+# corrupts the boot environment, and `rollback` stages a sabotage image and
+# rolls back — both leave persistent state behind. A real machine was walked
+# into an unbootable state partly because every run shared one mutable disk, so
+# a drill's damage outlived the drill.
+DESTRUCTIVE_SUITES = ("bootfloor", "rollback")
+
+
+def overlay_for(disk: Path, arch: str) -> Path:
+    """A copy-on-write overlay, so a destructive suite cannot poison the image.
+
+    qcow2 backing files make this a metadata-only operation: the overlay starts
+    empty and the golden disk is opened read-only underneath it.
+    """
+    import subprocess
+
+    overlay = disk.parent / f"overlay-{arch}.qcow2"
+    overlay.unlink(missing_ok=True)
+    subprocess.run(
+        [
+            "qemu-img",
+            "create",
+            "-f",
+            "qcow2",
+            "-b",
+            str(disk.resolve()),
+            "-F",
+            "qcow2",
+            str(overlay),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    print(f"harness: writing to overlay {overlay.name}; {disk.name} stays clean")
+    return overlay
+
+
 def find_disk(arch: str) -> Path:
     build = ROOT / "build"
     candidates = sorted(build.rglob("*.qcow2")) if build.is_dir() else []
@@ -237,6 +274,8 @@ def main() -> int:
 
     # The privacy suite audits traffic, so it needs the capture enabled at boot
     # — it cannot be turned on once the VM is already running.
+    if args.suite in DESTRUCTIVE_SUITES:
+        disk = overlay_for(disk, args.arch)
     vm = VM(disk=disk, arch=args.arch, capture=args.suite == "privacy")
     failure: BaseException | None = None
     try:
