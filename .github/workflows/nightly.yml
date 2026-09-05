@@ -49,6 +49,10 @@ jobs:
         run: |
           echo "user  graphroot: $(podman info --format '{{ .Store.GraphRoot }}')"
           echo "root  graphroot: $(sudo env HOME=/root podman info --format '{{ .Store.GraphRoot }}')"
+          echo "root  configfile: $(sudo env HOME=/root podman info --format '{{ .Store.ConfigFile }}')"
+          echo "root  w/ explicit conf: $(sudo env HOME=/root \
+            CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf \
+            podman info --format '{{ .Store.GraphRoot }}')"
           echo "--- configs root could be reading ---"
           for f in /etc/containers/storage.conf /root/.config/containers/storage.conf \
                    "$HOME/.config/containers/storage.conf"; do

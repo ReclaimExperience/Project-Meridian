@@ -55,6 +55,23 @@ CONF
 sudo mkdir -p "${STORAGE_ROOT}/storage-root" /var/lib/containers/storage
 sudo mount --bind "${STORAGE_ROOT}/storage-root" /var/lib/containers/storage
 
+# And say so EXPLICITLY, in a file whose path we pass to podman directly.
+#
+# Relying on root resolving its own config was wrong three times. Measured on
+# the runner: with HOME=/root, no /etc/containers/storage.conf and no
+# /root/.config/containers/storage.conf, `sudo podman info` still reported
+# graphroot=/mnt/containers/storage — the rootless value — so root was reading
+# the invoking user's config by some path that is not worth reverse-engineering.
+# CONTAINERS_STORAGE_CONF leaves nothing to resolve.
+sudo mkdir -p /etc/containers
+sudo tee /etc/containers/storage-root.conf >/dev/null <<CONF
+[storage]
+driver = "overlay"
+graphroot = "/var/lib/containers/storage"
+runroot = "/run/containers/storage"
+CONF
+echo "root store config: /etc/containers/storage-root.conf -> /var/lib/containers/storage"
+
 echo "after:"
 df -h / /mnt 2>/dev/null | sed 's/^/  /'
 echo "podman graphroot: $(podman info --format '{{ .Store.GraphRoot }}')"

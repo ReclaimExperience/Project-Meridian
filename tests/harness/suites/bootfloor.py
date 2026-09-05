@@ -75,6 +75,34 @@ def _grubenv(console) -> dict:
     return env
 
 
+def _assert_greenboot_live(console) -> None:
+    """Refuse to judge the product on a disk whose greenboot has been muzzled.
+
+    The theme capture suite masks greenboot-healthcheck and redboot-auto-reboot
+    so a mid-capture reboot cannot ruin a screenshot, and those masks are
+    persistent — they live in /etc on a disk that survives every later run. A
+    prevention check on such a disk observes boot_success staying 0 and blames
+    the product for a silence the harness imposed.
+
+    So the environment is asserted before the verdict is. A contaminated disk
+    must fail LOUDLY as contamination, not quietly as a defect.
+    """
+    _s, out = console.run(
+        "systemctl is-enabled greenboot-healthcheck.service 2>&1; "
+        "systemctl is-enabled redboot-auto-reboot.service 2>&1",
+        timeout=90,
+    )
+    if "masked" in out:
+        raise AssertionError(
+            "greenboot is MASKED on this disk, so nothing can confirm a boot "
+            "and boot_success can never reach 1.\n"
+            f"  guest said: {out.strip()[:160]!r}\n"
+            "  This is harness contamination, not a product defect: the theme "
+            "capture suite masks these and the mask persists on the disk. Run "
+            "against a freshly built image, or unmask before judging."
+        )
+
+
 def _assert_counter_resets(console) -> None:
     """A healthy boot must clear the boot counter.
 
@@ -142,6 +170,7 @@ def run(vm: VM, credentials: dict) -> None:
         time.sleep(1.2)
 
     console.login(user, password, timeout=600)
+    _assert_greenboot_live(console)
     _assert_counter_resets(console)
     console.send_line("sudo -n systemctl reboot")
     time.sleep(5)

@@ -77,14 +77,18 @@ if [[ "$(podman info --format '{{ .Host.Security.Rootless }}')" == "true" ]]; th
     # prepare-runner.sh already solves this properly for the rootful store by
     # bind-mounting the big volume UNDER the canonical path. `-E` was quietly
     # undoing that. PATH is still passed through, which is all -E was wanted for.
-    SUDO=(sudo env "PATH=${PATH}" "HOME=/root")
+    # CONTAINERS_STORAGE_CONF names the store explicitly, because root does
+    # NOT reliably resolve to /var/lib/containers/storage on its own here —
+    # measured, not assumed (see ci/prepare-runner.sh).
+    SUDO=(sudo env "PATH=${PATH}" "HOME=/root"
+          "CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf")
     if "${SUDO[@]}" podman image exists "${LOCAL_REF}"; then
         echo "  ${LOCAL_REF} is already in rootful storage; no transfer needed"
     else
         echo "  ${LOCAL_REF} is only in the rootless store — transferring."
         echo "  This copies ~8.7 GiB and takes about four minutes. It happens"
         echo "  when the image was built rootless; CI builds rootful to skip it."
-        podman save "${LOCAL_REF}" | sudo podman load
+        podman save "${LOCAL_REF}" | "${SUDO[@]}" podman load
     fi
 else
     SUDO=()
