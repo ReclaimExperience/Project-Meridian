@@ -60,7 +60,9 @@ def run(vm: VM, credentials: dict) -> None:
             f"(greeter={greeter}, graphical={graphical})"
         )
     greeter_s, graphical_s = greeter / 1e6, graphical / 1e6
-    print(f"boottime: greeter at {greeter_s:.1f}s, graphical.target at {graphical_s:.1f}s")
+    print(
+        f"boottime: greeter at {greeter_s:.1f}s, graphical.target at {graphical_s:.1f}s"
+    )
 
     _s, chain = console.run(
         "systemd-analyze critical-chain graphical.target --no-pager 2>&1 | head -12",

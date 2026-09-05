@@ -146,6 +146,32 @@ jobs:
           echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
       - name: Build the image under test
         run: bash ci/build.sh x86_64
+      # OBSERVATION ONLY — deliberately changes nothing.
+      #
+      # "Build the disk image" has now failed two ways with the SAME config:
+      #   database graph driver "" does not match our graph driver "overlay"
+      #   database static dir "/mnt/..." does not match "/var/lib/..."
+      # and succeeded twice. That is intermittent, and every fix so far has
+      # been aimed at a mechanism inferred from one red run. Worse, the last
+      # attempt changed two things at once, so its result was unattributable.
+      #
+      # This step prints the store's actual state immediately before the build.
+      # No fix accompanies it, so whatever the next run shows is attributable.
+      - name: Root store state before the disk build
+        run: |
+          CONF=/etc/containers/storage-root.conf
+          echo "--- config we intend root to use ---"; sudo cat "$CONF" 2>&1 || true
+          echo "--- what root actually resolves ---"
+          sudo env HOME=/root CONTAINERS_STORAGE_CONF="$CONF" \
+            podman info --format 'graphroot={{ .Store.GraphRoot }} driver={{ .Store.GraphDriverName }} conf={{ .Store.ConfigFile }}' 2>&1 || true
+          echo "--- store contents ---"
+          sudo ls -la /var/lib/containers/storage 2>&1 | head -12
+          echo "--- is the bind mount there ---"
+          findmnt -no SOURCE,TARGET /var/lib/containers/storage 2>&1 || echo "(not mounted)"
+          echo "--- images root can see ---"
+          sudo env HOME=/root CONTAINERS_STORAGE_CONF="$CONF" \
+            podman images --format '{{ .Repository }}:{{ .Tag }}' 2>&1 | head -5 || true
+
       - name: Build the disk image
         run: bash ci/vm-test.sh x86_64 smoke
 
