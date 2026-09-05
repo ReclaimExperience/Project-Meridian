@@ -57,6 +57,7 @@ SUITES = (
 # into an unbootable state partly because every run shared one mutable disk, so
 # a drill's damage outlived the drill.
 DESTRUCTIVE_SUITES = ("bootfloor", "rollback")
+OVERLAY_PREFIX = "overlay-"
 
 
 def overlay_for(disk: Path, arch: str) -> Path:
@@ -67,7 +68,12 @@ def overlay_for(disk: Path, arch: str) -> Path:
     """
     import subprocess
 
-    overlay = disk.parent / f"overlay-{arch}.qcow2"
+    if disk.name.startswith(OVERLAY_PREFIX):
+        raise SystemExit(
+            f"refusing to build an overlay on top of an overlay ({disk.name}). "
+            "Delete it and re-run against the real image."
+        )
+    overlay = disk.parent / f"{OVERLAY_PREFIX}{arch}.qcow2"
     overlay.unlink(missing_ok=True)
     subprocess.run(
         [
@@ -90,7 +96,17 @@ def overlay_for(disk: Path, arch: str) -> Path:
 
 def find_disk(arch: str) -> Path:
     build = ROOT / "build"
-    candidates = sorted(build.rglob("*.qcow2")) if build.is_dir() else []
+    # Overlays are OUTPUT, not input. Without this the second run of a
+    # destructive suite finds the previous run's overlay, calls it the disk,
+    # and asks qemu-img to back a file with itself:
+    #   Error: Trying to create an image with the same filename as the backing file
+    candidates = (
+        sorted(
+            p for p in build.rglob("*.qcow2") if not p.name.startswith(OVERLAY_PREFIX)
+        )
+        if build.is_dir()
+        else []
+    )
     # Prefer a disk whose path names this arch. `arch` was previously used only
     # in the error string, so on a machine holding both images the harness
     # booted whichever sorted first and then labelled its evidence and its
