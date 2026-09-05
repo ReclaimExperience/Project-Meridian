@@ -95,7 +95,11 @@ def main() -> int:
             environ["MERIDIAN_GRUBENV"] = str(env_file)
             environ["MERIDIAN_BLS_ENTRIES"] = str(entdir)
             proc = subprocess.run(
-                ["bash", str(SCRIPT)], env=environ, capture_output=True, text=True
+                ["bash", str(SCRIPT)],
+                env=environ,
+                capture_output=True,
+                text=True,
+                check=False,  # the exit code IS part of what is asserted
             )
             if proc.returncode != 0:
                 print(f"FAIL [{name}]: exited {proc.returncode}: {proc.stderr[:200]}")
@@ -114,7 +118,9 @@ def main() -> int:
     if failures:
         print(f"boot-floor: {failures} failure(s)")
         return 1
-    print(f"boot-floor: {len(CASES)} state(s) — brick disarmed, real rollback untouched")
+    print(
+        f"boot-floor: {len(CASES)} state(s) — brick disarmed, real rollback untouched"
+    )
     return 0
 
 

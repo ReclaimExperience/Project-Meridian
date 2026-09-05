@@ -362,18 +362,12 @@ vm-image arch="x86_64":
     printf '{"user": "mtest", "password": "%s"}\n' "${devpass}" > build/dev-credentials.json
     chmod 600 build/dev-credentials.json
 
-    # The store must be visible inside the builder at THE SAME PATH its own
-    # database recorded, or podman refuses to open it:
-    #
-    #   database static dir "/mnt/containers/storage/libpod" does not match
-    #   our static dir "/var/lib/containers/storage/libpod"
-    #
-    # CI moves the store to /mnt for space (ci/prepare-runner.sh), so mounting
-    # it at the conventional /var/lib path made every nightly qcow2 build fail
-    # with exit 125 — the qcow2 pipeline has never once produced an artifact.
-    # Mount it where it thinks it lives, and tell the builder to look there.
-    printf '[storage]\ndriver = "overlay"\ngraphroot = "%s"\nrunroot = "/run/containers/storage"\n' \
-        "${graphroot}" > build/bib-storage.conf
+    # The store is mounted at /var/lib/containers/storage because that is where
+    # bootc-image-builder looks; mounting it anywhere else fails with
+    # "could not access container storage, did you forget -v ...". The store's
+    # own database must ALSO record that path, or podman refuses to open it —
+    # ci/prepare-runner.sh keeps that true by bind-mounting the big volume
+    # under the canonical path rather than reconfiguring graphroot.
 
     echo "building qcow2 from ${tag}"
     echo "  dev login: mtest / ${devpass}   (this disk image only; never published)"
@@ -381,8 +375,7 @@ vm-image arch="x86_64":
         --platform "${platform}" \
         --security-opt label=type:unconfined_t \
         -v "$(pwd)/build:/output" \
-        -v "${graphroot}:${graphroot}" \
-        -v "$(pwd)/build/bib-storage.conf:/etc/containers/storage.conf:ro" \
+        -v "${graphroot}:/var/lib/containers/storage" \
         -v "${conf}:/config.toml:ro" \
         quay.io/centos-bootc/bootc-image-builder:latest \
         --type qcow2 \
