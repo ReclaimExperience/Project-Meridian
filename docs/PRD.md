@@ -853,16 +853,28 @@ Phase 0 ≈ 11 sessions · Phase 1 ≈ 17 · Phase 2 ≈ 22 · Phase 3 ≈ 16 ·
 
 ### 10.2 Hardware matrix (mandatory rows for 1.0; template in `docs/qa/`)
 
-| Class | Reference target | Why |
-|---|---|---|
-| Win10-refugee desktop | Dell OptiPlex 3050 / HP 2016–2017 i5, HDD+SSD | Pat's machine; BIOS+UEFI variants |
-| Win10-refugee laptop | ThinkPad T480 or similar 8th-gen | The canonical switcher laptop |
-| Modern mainstream laptop | 2022+ Ryzen or 12th-gen Intel, Wi-Fi 6 | Sam's class; s2idle + brightness + webcam |
-| Low-end constraint | 4 GB RAM Celeron/Pentium laptop, eMMC | Floor honesty (ADR-013). **Canonical seat for `ram.idle.product` (ADR-017).** |
-| Touch-equipped laptop **(mandatory)** | Any 2-in-1 or touchscreen laptop | ADR-018 §6: the on-screen keyboard is automatic on touch hardware, and this is the only row that can prove it still appears when it should — a touchless machine cannot fail that check. The reworked trim ships to `:testing` on structural greeter safety (nothing writes to `/etc`, the greeter reads none of it); **verification on this seat gates `:stable` for the feature.** |
-| Nvidia desktop | GTX 16xx AND RTX 30xx+ | ADR-012 both driver generations |
-| Trouble-hardware seat | One Broadcom-Wi-Fi Mac or similar | Driver-stack proof |
-| VMs | UTM/aarch64 (dev loop), QEMU-KVM x86_64 (CI), plus one VirtualBox+VMware smoke | Where users will "try it first" |
+| Class | Reference target | Boot→greeter (measured) | Why |
+|---|---|---|---|
+| Win10-refugee desktop | Dell OptiPlex 3050 / HP 2016–2017 i5, HDD+SSD | — | Pat's machine; BIOS+UEFI variants |
+| Win10-refugee laptop | ThinkPad T480 or similar 8th-gen | — | The canonical switcher laptop |
+| Modern mainstream laptop | 2022+ Ryzen or 12th-gen Intel, Wi-Fi 6 | — | Sam's class; s2idle + brightness + webcam |
+| Low-end constraint | 4 GB RAM Celeron/Pentium laptop, eMMC | **required — sets the health-check deadline** | Floor honesty (ADR-013). **Canonical seat for `ram.idle.product` (ADR-017).** |
+| Touch-equipped laptop **(mandatory)** | Any 2-in-1 or touchscreen laptop | — | ADR-018 §6: the on-screen keyboard is automatic on touch hardware, and this is the only row that can prove it still appears when it should — a touchless machine cannot fail that check. The reworked trim ships to `:testing` on structural greeter safety (nothing writes to `/etc`, the greeter reads none of it); **verification on this seat gates `:stable` for the feature.** |
+| Nvidia desktop | GTX 16xx AND RTX 30xx+ | — | ADR-012 both driver generations |
+| Trouble-hardware seat | One Broadcom-Wi-Fi Mac or similar | — | Driver-stack proof |
+| VMs | UTM/aarch64 (dev loop), QEMU-KVM x86_64 (CI), plus one VirtualBox+VMware smoke | ~8s greeter / ~80s graphical.target (llvmpipe) | Where users will "try it first" |
+
+**Boot→greeter is a gating measurement, not a statistic.** greenboot's required
+health check has a deadline, and a machine that misses it is rebooted and has a
+boot attempt spent. Exhaust those and the machine stops booting — one was found
+in that state during WP-05. The deadline is currently **300s, provisional and
+deliberately loose**: the asymmetry is brutal, since too tight bricks a machine
+and too loose only delays a rollback.
+
+Set it from this column once the numbers exist: **slowest observed × 2**, taken
+on the low-end row. Do not tighten it by guessing. Note also that the check
+waits for the GREETER, not for `graphical.target` — on the CI VM those are ~8s
+and ~80s apart, and it was waiting on the latter that produced the brick.
 
 Per-row protocol: live-boot hardware panel → install (path per row) → ZT sampler (01,03,05,06,16,22) → sleep/resume ×10 (laptops) → update+rollback drill → result + quirks logged.
 
