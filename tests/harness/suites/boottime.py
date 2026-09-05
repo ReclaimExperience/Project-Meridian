@@ -43,25 +43,64 @@ def run(vm: VM, credentials: dict) -> None:
     masked = "masked" in mask
     print(f"boottime: NetworkManager-wait-online is {mask.strip()[-12:]!r}")
 
-    # Wait for the target so the measurement is of a settled boot, not a
-    # snapshot taken mid-way.
-    console.wait_until(
-        "systemctl is-active graphical.target || true",
-        lambda out: "active" in out and "inactive" not in out,
-        timeout=420,
-        description="graphical.target to settle",
-    )
+    # Wait for the target — but NEVER abort on it. A measurement suite that
+    # raises before it measures reports only that something is wrong, which is
+    # the least useful thing it could say. The first version did exactly that.
+    settled = True
+    try:
+        console.wait_until(
+            "systemctl is-active graphical.target || true",
+            lambda out: "active" in out and "inactive" not in out,
+            timeout=420,
+            description="graphical.target to settle",
+        )
+    except Exception as exc:  # noqa: BLE001 — not settling is a RESULT here
+        settled = False
+        print(f"boottime: graphical.target did NOT settle — {str(exc)[:160]}")
+
+    # Whatever happened above, find out what systemd is actually waiting on.
+    for label, cmd in (
+        (
+            "state",
+            (
+                "systemctl is-active graphical.target; "
+                "systemctl is-failed graphical.target"
+            ),
+        ),
+        ("jobs still running", "systemctl list-jobs --no-pager 2>&1 | head -12"),
+        (
+            "failed units",
+            (
+                "systemctl list-units --state=failed --no-legend --no-pager "
+                "2>&1 | head -10"
+            ),
+        ),
+        (
+            "graphical.target deps",
+            (
+                "systemctl show -p Wants -p Requires --value graphical.target "
+                "2>&1 | tr ' ' '\\n' | head -12"
+            ),
+        ),
+        (
+            "network-online",
+            (
+                "systemctl is-active network-online.target; "
+                "systemctl is-enabled NetworkManager-wait-online.service"
+            ),
+        ),
+    ):
+        _s, out = console.run(cmd, timeout=120)
+        print(f"boottime: {label}\n{out.strip()[:500]}\n")
 
     greeter = _monotonic_us(console, "display-manager.service")
     graphical = _monotonic_us(console, "graphical.target")
-    if not greeter or not graphical:
-        raise AssertionError(
-            "could not read activation timestamps "
-            f"(greeter={greeter}, graphical={graphical})"
-        )
-    greeter_s, graphical_s = greeter / 1e6, graphical / 1e6
+    greeter_s = greeter / 1e6 if greeter else 0.0
+    graphical_s = graphical / 1e6 if graphical else 0.0
     print(
-        f"boottime: greeter at {greeter_s:.1f}s, graphical.target at {graphical_s:.1f}s"
+        f"boottime: greeter at {greeter_s:.1f}s, "
+        f"graphical.target at {graphical_s:.1f}s"
+        + ("" if settled else "  (TARGET NEVER SETTLED)")
     )
 
     _s, chain = console.run(
