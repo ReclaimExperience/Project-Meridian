@@ -42,6 +42,24 @@ jobs:
       - name: Log in to GHCR
         run: echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
 
+      # Three wrong fixes have been made to the container-store path by
+      # reasoning about it. This prints what is actually true, so the next
+      # failure is diagnosed from evidence rather than from a fourth guess.
+      - name: Container store facts
+        run: |
+          echo "user  graphroot: $(podman info --format '{{ .Store.GraphRoot }}')"
+          echo "root  graphroot: $(sudo env HOME=/root podman info --format '{{ .Store.GraphRoot }}')"
+          echo "--- configs root could be reading ---"
+          for f in /etc/containers/storage.conf /root/.config/containers/storage.conf \
+                   "$HOME/.config/containers/storage.conf"; do
+            echo "== $f"; sudo cat "$f" 2>/dev/null || echo "   (absent)"
+          done
+          echo "--- mounts ---"
+          findmnt -no SOURCE,TARGET /var/lib/containers/storage || echo "   (not a mount)"
+          echo "--- store databases ---"
+          sudo find /var/lib/containers/storage /mnt/containers -maxdepth 2 \
+               -name 'libpod' -o -maxdepth 2 -name '*.db' 2>/dev/null | head
+
       - name: Build image
         run: bash ci/build.sh x86_64
 

@@ -131,7 +131,12 @@ def run(vm: VM, credentials: dict) -> None:
         "set boot_counter=3",
         "set boot_success=0",
         "save_env boot_counter boot_success",
-        "boot",
+        # `reboot`, not `boot`. At the grub> prompt no kernel has been loaded,
+        # so `boot` has nothing to start and the machine sits there until the
+        # console times out — which reads as "the VM never got past the
+        # bootloader" and looks exactly like the brick this suite hunts.
+        # save_env has already persisted the change; the next boot picks it up.
+        "reboot",
     ):
         console.send(command + "\n")
         time.sleep(1.2)
