@@ -66,7 +66,10 @@ sudo mount --bind "${STORAGE_ROOT}/storage-root" /var/lib/containers/storage
 sudo mkdir -p /etc/containers
 sudo tee /etc/containers/storage-root.conf >/dev/null <<CONF
 [storage]
-driver = "overlay"
+# NO driver line. Naming it "overlay" here made podman refuse the store with
+#   database graph driver "" does not match our graph driver "overlay"
+# because the store's database had never recorded one. Say only what needs
+# saying — the paths — and let podman detect the rest.
 graphroot = "/var/lib/containers/storage"
 runroot = "/run/containers/storage"
 CONF
