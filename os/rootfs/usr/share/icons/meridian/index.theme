@@ -1,0 +1,20 @@
+# GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`.
+[Icon Theme]
+Name=Meridian
+Comment=Meridian icon overrides; inherits Breeze for everything else.
+Inherits=breeze,hicolor
+Directories=apps/scalable,places/scalable
+
+[apps/scalable]
+Size=48
+MinSize=16
+MaxSize=512
+Type=Scalable
+Context=Applications
+
+[places/scalable]
+Size=48
+MinSize=16
+MaxSize=512
+Type=Scalable
+Context=Places

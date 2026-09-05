@@ -605,6 +605,170 @@ def plasma_style(tokens: dict, brand: str) -> dict:
     }
 
 
+# ------------------------------------------------------------ icon theme ----
+#
+# PRD 4.4: Breeze as the base set, with an override layer for the folder set
+# (tinted to accent), the core app icons (rounded-square, gradient tiles per
+# the mockup's language) and tray glyphs. Full custom artwork is v2; 1.0
+# overrides only what the eye lands on, and INHERITS Breeze for everything
+# else — an icon theme that overrode everything would be a v2-sized job and
+# would break the moment an app we did not anticipate is installed.
+#
+# The tile language is read from the mockup source (R-K), not approximated
+# from a screenshot: 135-degree two-stop linear gradients, a rounded square at
+# ~0.28 of the tile, a white glyph.
+
+ICON_TILES = {
+    # name in the mockup -> (light stop, dark stop, glyph)
+    "meridian-files": ("#5b9df2", "#3f6fd8", "F"),
+    "meridian-web": ("#7a6ff0", "#5a4bd8", "W"),
+    "meridian-mail": ("#4fc3a1", "#2e9d7d", "M"),
+    "meridian-photos": ("#f0a15b", "#e07c3a", "P"),
+    "meridian-music": ("#ef6a8b", "#d84868", "Mu"),
+    "meridian-notes": ("#f2c94c", "#dfa62e", "N"),
+    "meridian-software": ("#56ccf2", "#2f9fd0", "S"),
+    "meridian-office": ("#8f7be8", "#6c56cc", "O"),
+    "meridian-settings": ("#9aa2b1", "#6f7787", "Se"),
+    "meridian-computer": ("#9aa2b1", "#6f7787", "C"),
+    "meridian-trash": ("#b0b6c2", "#8a92a3", "T"),
+}
+# An icon theme only overrides an icon whose NAME an app actually asks for.
+# Shipping `meridian-files.svg` overrides nothing, because no desktop entry
+# references it — the theme would install, apply, and change not one pixel.
+# That is the present-but-inert shape again, so the tiles are also emitted
+# under the names the shipped apps really use.
+#
+# Only unambiguous mappings are listed. PRD 4.4 says "the 12 core app icons"
+# and the mockup defines nine apps plus Computer and Trash, so WHICH twelve is
+# an open question recorded in theming.md rather than guessed at here.
+ICON_ALIASES = {
+    "meridian-files": ("org.kde.dolphin", "system-file-manager"),
+    "meridian-photos": ("org.kde.gwenview",),
+    "meridian-music": ("org.kde.haruna",),
+    "meridian-notes": ("org.kde.kwrite",),
+    "meridian-settings": ("systemsettings", "preferences-system"),
+    "meridian-computer": ("computer",),
+    "meridian-trash": ("user-trash",),
+    "meridian-web": ("firefox", "org.mozilla.firefox"),
+    "meridian-office": ("libreoffice-startcenter",),
+}
+# The folder set the eye actually lands on: Dolphin's sidebar and the desktop.
+FOLDER_ALIASES = (
+    "folder",
+    "user-home",
+    "folder-documents",
+    "folder-downloads",
+    "folder-pictures",
+    "folder-music",
+    "folder-videos",
+)
+ICON_SIZE = 48
+TILE_RADIUS_RATIO = 13 / 46  # the mockup's 46px tile with a 13px radius
+
+
+def icon_tile(light: str, dark: str, glyph: str, family: str) -> str:
+    """One app tile: rounded square, 135-degree gradient, white glyph.
+
+    The glyph is TEXT, because the mockup's is. That makes the icon depend on
+    the UI font being resolvable at icon-render time, which is a real risk and
+    is why the capture suite photographs the launcher rather than trusting the
+    file to exist.
+    """
+    size = ICON_SIZE
+    radius = round(size * TILE_RADIUS_RATIO)
+    ident = f"g{abs(hash((light, dark))) % 100000}"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!-- GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}"
+     viewBox="0 0 {size} {size}">
+  <defs>
+    <linearGradient id="{ident}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="{light}"/>
+      <stop offset="100%" stop-color="{dark}"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="{size}" height="{size}" rx="{radius}" ry="{radius}"
+        fill="url(#{ident})"/>
+  <text x="{size / 2}" y="{size / 2}" fill="#ffffff" font-family="{family}"
+        font-size="{round(size * 0.42)}" font-weight="700"
+        text-anchor="middle" dominant-baseline="central">{glyph}</text>
+</svg>
+"""
+
+
+def folder_icon(accent: str, accent_dark: str, open_flap: bool = False) -> str:
+    """The folder set, tinted to accent (PRD 4.4)."""
+    size = ICON_SIZE
+    ident = "fld" + ("open" if open_flap else "")
+    body = (
+        f'<path d="M4,14 h13 l4,4 h23 a3,3 0 0 1 3,3 v20 a3,3 0 0 1 -3,3 '
+        f'h-40 a3,3 0 0 1 -3,-3 v-24 a3,3 0 0 1 3,-3 z" fill="url(#{ident})"/>'
+    )
+    flap_path = (
+        '\n  <path d="M7,26 h38 l-4,15 a3,3 0 0 1 -3,2 h-34 z" '
+        'fill="#ffffff" fill-opacity="0.22"/>'
+    )
+    flap = flap_path if open_flap else ""
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!-- GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}"
+     viewBox="0 0 {size} {size}">
+  <defs>
+    <linearGradient id="{ident}" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0%" stop-color="{accent}"/>
+      <stop offset="100%" stop-color="{accent_dark}"/>
+    </linearGradient>
+  </defs>
+  {body}{flap}
+</svg>
+"""
+
+
+def icon_theme(tokens: dict, brand: str) -> dict:
+    """The `meridian` icon override layer, keyed by relative path."""
+    family = tokens["font"]["ui"][0]
+    accent = tokens["color"]["accent"]["blue"]
+    files = {}
+
+    directories = ["apps/scalable", "places/scalable"]
+    index = [
+        "# GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`.",
+        "[Icon Theme]",
+        f"Name={brand}",
+        f"Comment={brand} icon overrides; inherits Breeze for everything else.",
+        # Inheriting is the whole design: we override what the eye lands on and
+        # let Breeze answer for the thousands of icons we have not drawn.
+        "Inherits=breeze,hicolor",
+        f"Directories={','.join(directories)}",
+        "",
+    ]
+    for directory in directories:
+        index += [
+            f"[{directory}]",
+            f"Size={ICON_SIZE}",
+            "MinSize=16",
+            "MaxSize=512",
+            "Type=Scalable",
+            "Context=" + ("Applications" if directory.startswith("apps") else "Places"),
+            "",
+        ]
+    files["index.theme"] = "\n".join(index)
+
+    for name, (light, dark, glyph) in ICON_TILES.items():
+        tile = icon_tile(light, dark, glyph, family)
+        files[f"apps/scalable/{name}.svg"] = tile
+        for alias in ICON_ALIASES.get(name, ()):
+            files[f"apps/scalable/{alias}.svg"] = tile
+
+    closed = folder_icon(accent["hex"], accent["hoverHex"], False)
+    files["places/scalable/folder-open.svg"] = folder_icon(
+        accent["hex"], accent["hoverHex"], True
+    )
+    for alias in FOLDER_ALIASES:
+        files[f"places/scalable/{alias}.svg"] = closed
+    return files
+
+
 def main(argv: list[str] | None = None) -> int:
     # --out lets the staleness lint regenerate into a scratch tree and diff,
     # driving THIS file rather than a rewritten copy of it. A check that tests a
@@ -651,6 +815,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     for rel, content in plasma_style(tokens, brand).items():
         extra[style_root / rel] = content
+
+    icon_root = Path(
+        str(out).replace("usr/share/color-schemes", f"usr/share/icons/{brand.lower()}")
+    )
+    for rel, content in icon_theme(tokens, brand).items():
+        extra[icon_root / rel] = content
 
     for path, content in extra.items():
         path.parent.mkdir(parents=True, exist_ok=True)

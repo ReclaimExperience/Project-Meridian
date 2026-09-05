@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GENERATED FROM docs/design/tokens.json - DO NOT EDIT. `just assets`. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"
+     viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="fldopen" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0%" stop-color="#0098c0"/>
+      <stop offset="100%" stop-color="#0079a0"/>
+    </linearGradient>
+  </defs>
+  <path d="M4,14 h13 l4,4 h23 a3,3 0 0 1 3,3 v20 a3,3 0 0 1 -3,3 h-40 a3,3 0 0 1 -3,-3 v-24 a3,3 0 0 1 3,-3 z" fill="url(#fldopen)"/>
+  <path d="M7,26 h38 l-4,15 a3,3 0 0 1 -3,2 h-34 z" fill="#ffffff" fill-opacity="0.22"/>
+</svg>

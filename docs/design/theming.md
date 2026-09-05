@@ -210,3 +210,38 @@ Translucency comes from the token alpha (`surface.window` is
 it is a KWin effect and belongs to WP-07/08/09 (PRD §5.12 deviation 9) — a
 translucent panel over an unblurred background is the expected intermediate
 state, not a defect.
+
+## Icon theme `meridian`
+
+PRD 4.4: Breeze as the base set with an override layer for the folder set
+(tinted to accent), the core app icons and tray glyphs. `index.theme` declares
+`Inherits=breeze,hicolor`, which is the whole design — we override what the eye
+lands on and let Breeze answer for the thousands of icons we have not drawn.
+
+The tile language is read from the mockup **source**, not approximated from a
+render: 135° two-stop linear gradients, a rounded square at 13/46 of the tile,
+a white glyph. The gradients are the mockup's own values.
+
+**An icon theme only overrides an icon whose NAME an application asks for.**
+Shipping `meridian-files.svg` overrides nothing: no desktop entry references
+it, so the theme would install, apply, and change not one pixel — present,
+applied, inert. So each tile is emitted under the names the shipped apps
+actually use (`org.kde.dolphin`, `org.kde.gwenview`, `org.kde.haruna`,
+`org.kde.kwrite`, `systemsettings`, `computer`, `user-trash`, `firefox`,
+`libreoffice-startcenter`), and the accent folder under the set Dolphin's
+sidebar and the desktop show (`folder`, `user-home`, `folder-documents`,
+`folder-downloads`, `folder-pictures`, `folder-music`, `folder-videos`).
+
+### Open, and deliberately not guessed
+
+- **Which twelve?** PRD 4.4 says "the 12 core app icons". The mockup defines
+  nine apps plus Computer and Trash — eleven tiles. Mail and Software have no
+  shipped application to point at yet (our store is WP-13), and PRD §3.2's
+  visible set includes apps the mockup never drew (Ark, Okular, KCalc,
+  Spectacle, plasma-systemmonitor, print-manager). The mapping is an owner
+  decision, not an extraction.
+- **Tray glyphs** (1.6px stroke outline style per PRD 4.4) are not yet drawn.
+- **The glyph is text.** The mockup's tiles use letters, so ours do, which
+  makes the icon depend on the UI font resolving at icon-render time. That is a
+  real dependency and is why the capture photographs the launcher rather than
+  trusting the files to exist.
