@@ -194,8 +194,34 @@ accepts what it should, not that it refuses what it must, and a gate satisfied b
 its positive cases alone is not a gate.
 
 **"Negative test green" is a hard gate on the first `:stable` image** (ADR-022,
-promote gate 7.5). Until then the permissive default in `policy.json` is an
-honest description of a development state, not a lapse.
+promote gate 7.5).
+
+### The permissive default stays — and that is why this test matters (ADR-024)
+
+`default: insecureAcceptAnything` is **settled, not leftover**. ADR-022 recorded it
+as a `:testing`-only state to tighten once this test passed; ADR-024 decided
+otherwise on the evidence.
+
+`default: reject` protects against the wrong thing. Everything it would newly
+refuse is a user deliberately pulling a container — `toolbox`/`distrobox`, shipped
+for Advanced users (ADR-004, PRD §3.2), pulling from Fedora, docker.io and
+quay.io. An allowlist broad enough to keep those working is permissive in
+practice, so reject buys approximately nothing against an attacker who already has
+enough code execution to run a pull, and breaks real function.
+
+**The consequence is that the scoped rule is the only thing enforcing update
+integrity**, so two checks hold it up, and the permissive default is safe only
+while both stay green:
+
+| Check | Proves | Runs |
+|---|---|---|
+| `tests/lint/policy_json.py` | the scope **exists** and names a key to trust | every PR |
+| the negative test above | the rule **enforces**, not merely parses | every push to `main` |
+
+Delete the scoped rule and the file stays valid JSON, every other check passes,
+and the machine silently accepts **any** image from our registry. That is why its
+presence is asserted rather than trusted — and why the lint alone is not enough,
+since a rule that refuses nothing would satisfy it.
 
 **Still unverified, and all three gate the first `:stable`:**
 

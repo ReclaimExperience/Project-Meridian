@@ -131,6 +131,48 @@ def main() -> int:
     if not problems:
         print("  ok    every key is one containers-policy.json(5) defines")
 
+    # --- ADR-024's standing guard -------------------------------------------
+    #
+    # The default is permissive on purpose, so the scoped rule is the ONLY thing
+    # enforcing update integrity. If it were deleted the file would stay valid
+    # JSON, every check above would pass, and the machine would silently accept
+    # any image from our registry. "Permissive default is safe only while the
+    # scope is present and enforcing" is a sentence; this is the half of it a
+    # test can hold.
+    print("\nADR-024 — integrity-critical scopes must be explicit, never the default")
+    branding = json.loads(
+        (
+            ROOT / "os" / "rootfs" / "usr" / "share" / "meridian" / "branding.json"
+        ).read_text()
+    )
+    scope = f"{branding['registry']['namespace']}/{branding['registry']['image']}"
+    docker_scopes = document.get("transports", {}).get("docker", {})
+    rules = docker_scopes.get(scope)
+
+    if not rules:
+        print(f"  FAIL  no explicit rule for {scope}.")
+        print("      With a permissive default, that means EVERY image from our")
+        print("      own registry is accepted unsigned — the exact failure this")
+        print("      guard exists for (ADR-024).")
+        failures += 1
+    else:
+        signed = [r for r in rules if r.get("type") == "sigstoreSigned"]
+        if not signed:
+            print(f"  FAIL  {scope} is ruled, but by {[r.get('type') for r in rules]}")
+            print("      — nothing there requires a signature.")
+            failures += 1
+        elif not any(
+            r.get("keyPaths") or r.get("keyPath") or r.get("fulcio") for r in signed
+        ):
+            print(f"  FAIL  {scope} requires a signature but names no key to trust.")
+            failures += 1
+        else:
+            print(f"  ok    {scope} carries an explicit signature requirement")
+
+    if document.get("default", [{}])[0].get("type") == "insecureAcceptAnything":
+        print("  ok    the default is permissive, as ADR-024 decided — which is why")
+        print("        the check above is not optional")
+
     print("\nthe real parser (skopeo), when it is available")
     with tempfile.TemporaryDirectory() as tmp:
         # Positive control FIRST: a check that cannot fail proves nothing.
