@@ -60,7 +60,26 @@ if systemctl is-failed --quiet display-manager.service; then
     fail "the display manager entered a failed state."
 fi
 
-# 3. Networking CAN start. NOT "is connected", and not "can resolve": a desktop
+# 3. Nothing in the graphical stack FAILED.
+#
+#    Read this next to check 1, because the pair is the whole lesson. The
+#    original check WAITED for graphical.target to go active, on a deadline
+#    tighter than the target's own worst case — that is what bricked machines.
+#    The first fix removed the target from the check altogether, and that
+#    removed the only thing the rollback drill's sabotage trips: the sabotage
+#    fails a unit RequiredBy=graphical.target while plasmalogin keeps serving a
+#    greeter perfectly well. greenboot passed the boot and marked it good.
+#
+#    Waiting for a target to ACTIVATE and asking whether it FAILED are
+#    different questions. The first is a race against slow hardware. The second
+#    is a fact, available immediately, and it is the one that matters.
+if systemctl is-failed --quiet graphical.target; then
+    fail "graphical.target is in a failed state. Something the desktop is
+      built on did not come up, and this update should not be kept."
+fi
+echo "greenboot: graphical.target has not failed"
+
+# 4. Networking CAN start. NOT "is connected", and not "can resolve": a desktop
 #    with no cable and no saved Wi-Fi is healthy, and rolling that machine back
 #    punishes someone for being offline.
 if ! systemctl is-enabled --quiet NetworkManager.service; then
