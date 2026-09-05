@@ -43,6 +43,10 @@ SUITES = (
     "stories",
     "perf",
     "rollback",
+    # The rollback drill's mirror: rollback proves recovery WHEN a
+    # fallback deployment exists; this proves the machine still boots when
+    # one does not.
+    "bootfloor",
     "theme",
 )
 

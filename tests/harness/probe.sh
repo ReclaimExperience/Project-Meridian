@@ -40,11 +40,16 @@ fi
 # it returned immediately and stamped "EXIT 0" while the probe was still
 # booting the VM. A status tool that lies is worse than no status tool, so this
 # one is tested below rather than assumed.
+export MERIDIAN_RUN_SCRIPT="$SCRIPT" MERIDIAN_RUN_LOG="$LOG"
+export MERIDIAN_RUN_PIDFILE="$PIDFILE" MERIDIAN_RUN_TIMEOUT="$TIMEOUT"
+# shellcheck disable=SC2016  # deliberate: the inner shell expands these, not us.
 setsid bash -c '
-  timeout -k 10 '"$TIMEOUT"' python3 -u '"$(printf %q "$SCRIPT")"' >>'"$(printf %q "$LOG")"' 2>&1
+  timeout -k 10 "$MERIDIAN_RUN_TIMEOUT" python3 -u "$MERIDIAN_RUN_SCRIPT" \
+      >>"$MERIDIAN_RUN_LOG" 2>&1
   code=$?
-  echo "=== PROBE EXIT ${code} $(date -u "+%Y-%m-%dT%H:%M:%SZ") ===" >>'"$(printf %q "$LOG")"'
-  rm -f '"$(printf %q "$PIDFILE")"'
+  echo "=== PROBE EXIT ${code} $(date -u "+%Y-%m-%dT%H:%M:%SZ") ===" \
+      >>"$MERIDIAN_RUN_LOG"
+  rm -f "$MERIDIAN_RUN_PIDFILE"
 ' >/dev/null 2>&1 &
 PID=$!
 echo "$PID" >"$PIDFILE"
