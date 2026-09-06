@@ -1,108 +1,122 @@
 #!/usr/bin/env bash
 # greenboot health check: did this boot produce a usable desktop? (ADR-008)
 #
-# A failing required check makes greenboot roll the machine back to the previous
-# deployment. That is the self-healing promise — and it is also a loaded gun, so
-# this file checks the things whose absence a person would actually notice, and
-# nothing else. Every false positive costs someone their update, silently.
+# A failing required check rolls the machine back. That is the self-healing
+# promise and also a loaded gun, so this file checks what a person would
+# actually notice and nothing else — every false positive costs someone their
+# update, silently.
 #
-# It has already fired for the wrong reason twice, and both times the cause was
-# the same: the check asserted something ADJACENT to a usable desktop rather
-# than the desktop itself.
+# ---------------------------------------------------------------------------
+# THE CONSTRAINT THAT SHAPES ALL OF THIS
 #
-#   1. `systemctl is-active sddm` — Fedora 44 replaced SDDM with plasmalogin, so
-#      this answered "inactive" on a perfectly healthy boot.
-#   2. `graphical.target` with a 90s deadline — the target goes active at ~80s
-#      on our own test hardware while `plasmalogin.service` has been up and
-#      serving a greeter the whole time. A ten-second margin is a coin toss, and
-#      every lost toss decremented `boot_counter` until the machine had no
-#      bootable deployment left. A machine was found in exactly that state.
+# This script runs inside greenboot-healthcheck.service, which is
+# WantedBy=multi-user.target. systemd will not complete multi-user.target's job
+# while this service is running, and graphical.target Requires=multi-user.target.
 #
-# So: assert the EFFECT — the greeter a person logs in through — not the
-# systemd abstraction that trails it. Rule R-I.
+# So this script MUST NOT WAIT FOR graphical.target. It cannot activate until
+# this script exits. Observed directly in systemd's job list:
 #
-# NOTHING here may depend on the network. A desktop for a switcher has to reach
-# a usable state fast with no network at all, so a network-dependent health
-# check rolls back exactly the machine that is working correctly: the laptop on
-# a train. greenboot's own 01_repository_dns_check.sh is disabled on this image
-# for the same reason.
+#   378 greenboot-healthcheck.service start running
+#   158 multi-user.target             start waiting
+#   157 graphical.target              start waiting
+#   display-manager.service:          active
+#
+# Earlier versions waited for that target on a 90s and then a 300s deadline.
+# Both always ran to the deadline, because the thing being waited for was
+# structurally prevented from happening. The check then failed, greenboot
+# rebooted, a boot attempt was spent, and enough of those left a machine
+# unbootable. The deadline was never the bug; the dependency cycle was.
+#
+# Asking `is-failed graphical.target` does not work either: a target that is
+# WAITING is not a target that has FAILED.
+#
+# ---------------------------------------------------------------------------
+# THREE STATES, not one deadline
+#
+#   fast PASS  — the greeter is serving. display-manager.service is outside the
+#                dependency cycle and comes up in seconds.
+#   fast FAIL  — something graphical.target depends on has genuinely failed.
+#                A failed dependency means the desktop is never arriving, so
+#                waiting the full deadline only delays a rollback that is
+#                already certain.
+#   TIMEOUT    — the ambiguous case only: nothing has failed, nothing is up
+#                yet. This is the sole case that needs a generous ceiling, and
+#                the only one a tight deadline could wrongly brick.
 set -euo pipefail
 
 fail() { echo "greenboot: FAIL — $*" >&2; exit 1; }
 
-# Provisional, and deliberately generous. PRD 10.2's hardware matrix has no
-# boot timings in it yet, so this is not yet "derived from the slowest matrix
-# machine plus margin" — it is a ceiling chosen to be far outside any plausible
-# healthy boot, because the failure mode of too-tight is a bricked machine and
-# the failure mode of too-loose is a slow rollback. Re-derive when the matrix
-# reports real numbers.
 DEADLINE="${MERIDIAN_HEALTH_DEADLINE:-300}"
+SYSTEMCTL="${MERIDIAN_SYSTEMCTL:-systemctl}"
+POLL=2
 
-# 1. There is a way in: the greeter is running.
-#
-#    display-manager.service is an alias, so ask about it rather than about any
-#    one implementation's name — that is what survived the SDDM -> plasmalogin
-#    swap, and will survive the next one.
+# Units graphical.target pulls in. The drill's sabotage installs itself as
+# RequiredBy=graphical.target, so it appears here.
+graphical_deps() {
+    "$SYSTEMCTL" show -p Wants -p Requires -p ConsistsOf --value graphical.target \
+        2>/dev/null | tr ' ' '\n' | sed '/^$/d' | sort -u
+}
+
+# Only units systemd has GIVEN UP on. A unit restarting shows as activating
+# (auto-restart), not failed, so a transient failure that recovers does not
+# trip this — which is the difference between fast-fail and trigger-happy.
+failed_units() {
+    "$SYSTEMCTL" list-units --state=failed --no-legend --plain --all 2>/dev/null \
+        | awk '{print $1}' | sed '/^$/d' | sort -u
+}
+
+broken_dependency() {
+    local common
+    common="$(comm -12 <(graphical_deps) <(failed_units) | head -3 | tr '\n' ' ')"
+    [[ -n "${common// /}" ]] && { echo "$common"; return 0; }
+    return 1
+}
+
 elapsed=0
-until systemctl is-active --quiet display-manager.service; do
-    if [[ "$elapsed" -ge "$DEADLINE" ]]; then
-        fail "no display manager after ${DEADLINE}s. A boot that never reaches a
-      greeter is the case rollback exists for, and on a machine with no terminal
-      by design (INV-0) it is unrecoverable without it."
+confirmations=0
+while :; do
+    # FAIL is checked first, and deliberately so: the sabotage fails early and
+    # the greeter still comes up, so a greeter-first order would pass a boot
+    # whose graphical stack is already broken. That exact ordering mistake
+    # shipped once and let a sabotaged boot through.
+    if broken="$(broken_dependency)"; then
+        fail "graphical.target depends on failed unit(s): ${broken}
+      systemd has given up on them, so the desktop is not coming. Rolling back
+      now rather than waiting out the ${DEADLINE}s ceiling."
     fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-done
-echo "greenboot: greeter up after ${elapsed}s"
 
-# 2. It did not immediately die.
-if systemctl is-failed --quiet display-manager.service; then
-    fail "the display manager entered a failed state."
-fi
-
-# 3. The graphical stack actually came up.
-#
-#    This is the ORIGINAL check, restored, and the story is worth keeping
-#    because two corrections in a row aimed at the wrong half of it.
-#
-#    The original waited for graphical.target to go active on a 90s deadline.
-#    The target clears at ~80s here, so it was a coin toss, and every lost toss
-#    spent a boot attempt until a machine had none left. Correct diagnosis:
-#    THE DEADLINE was too tight. My first fix instead deleted the target check
-#    and asserted only the greeter — which the rollback drill's sabotage does
-#    not disturb, so a sabotaged boot passed and greenboot kept a broken
-#    update. My second fix asked `is-failed graphical.target`, which is FALSE
-#    for a target that never activated at all: unreached is `inactive`, not
-#    `failed`. The sabotage prevents activation; it produces no failure state
-#    to find. That passed too.
-#
-#    So: wait for it, generously. Waiting is correct; the old deadline was not.
-#    NetworkManager-wait-online is masked (see the note beside that mask), which
-#    is what makes the target arrive promptly instead of at the ~80s mark.
-elapsed=0
-until systemctl is-active --quiet graphical.target; do
-    if [[ "$elapsed" -ge "$DEADLINE" ]]; then
-        fail "graphical.target did not come up within ${DEADLINE}s. Something
-      the desktop is built on did not start, and this update should not be
-      kept. (If a healthy machine ever trips this, the deadline is wrong —
-      raise it from PRD 10.2's measured column. Do NOT delete the check: that
-      was tried, and it let a sabotaged boot pass.)"
+    if "$SYSTEMCTL" is-active --quiet display-manager.service; then
+        # Confirm twice before passing. The failure check above races the
+        # sabotage on the first poll; a second look a poll later closes it.
+        confirmations=$((confirmations + 1))
+        if [[ "$confirmations" -ge 2 ]]; then
+            echo "greenboot: greeter serving after ${elapsed}s, no failed graphical units"
+            break
+        fi
+    else
+        confirmations=0
     fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-done
-echo "greenboot: graphical.target active after ${elapsed}s"
 
-# 4. Networking CAN start. NOT "is connected", and not "can resolve": a desktop
-#    with no cable and no saved Wi-Fi is healthy, and rolling that machine back
-#    punishes someone for being offline.
-if ! systemctl is-enabled --quiet NetworkManager.service; then
-    fail "NetworkManager is not enabled — the machine cannot get online at all,
-      which is not a state any update should be allowed to leave behind."
+    if [[ "$elapsed" -ge "$DEADLINE" ]]; then
+        fail "no greeter after ${DEADLINE}s, and nothing has failed outright.
+      This is the ambiguous case: the machine may simply be slower than the
+      ceiling allows. If a HEALTHY machine trips this, the ceiling is wrong —
+      raise it from PRD 10.2's measured Boot->greeter column. Do NOT make this
+      wait for graphical.target: it cannot activate while this check runs."
+    fi
+    sleep "$POLL"
+    elapsed=$((elapsed + POLL))
+done
+
+# Networking CAN start. NOT "is connected", and not "can resolve": a desktop
+# with no cable and no saved Wi-Fi is healthy, and rolling that machine back
+# punishes someone for being offline. greenboot's own DNS check is disabled on
+# this image for the same reason.
+if ! "$SYSTEMCTL" is-enabled --quiet NetworkManager.service; then
+    fail "NetworkManager is not enabled — the machine cannot get online at all."
 fi
-if systemctl is-failed --quiet NetworkManager.service; then
+if "$SYSTEMCTL" is-failed --quiet NetworkManager.service; then
     fail "NetworkManager entered a failed state during boot."
 fi
-echo "greenboot: NetworkManager enabled and not failed"
 
 echo "greenboot: desktop health checks passed"

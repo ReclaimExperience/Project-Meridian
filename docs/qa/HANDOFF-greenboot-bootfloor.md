@@ -200,6 +200,24 @@ timing), or the polls were not executing and the "2 unanswered" count is
 misleading (see 3.4). **Resolve this before touching the health check again** —
 every conclusion about the check depends on it.
 
+### 4.2c The check is now three-state (implemented, predicate validated)
+
+`fast PASS` on the greeter (outside the dependency cycle, up in seconds),
+`fast FAIL` the instant a unit graphical.target depends on has genuinely
+failed, `TIMEOUT` only for the ambiguous case. It never waits on
+graphical.target, which it structurally cannot observe.
+
+Measured, not argued: with a 300s ceiling the sabotage case exits in **0.16s**,
+so rollback is no longer gated on the ceiling. `tests/lint/test_health_check.py`
+covers six states with a stubbed systemctl, including the two that carry the
+risk — a sabotaged dependency must fail fast, and a unit systemd is still
+restarting must NOT (auto-restart shows as activating, not failed). The
+failure-before-greeter ordering is mutation-tested: inverting it makes the
+sabotage case pass, exactly as it did when that ordering shipped.
+
+Still unproven ON A MACHINE: this has stub-level validation only. The rollback
+drill is what closes it.
+
 ### 4.3 The rollback drill has never passed on this branch
 
 Latest attempt: the check correctly refuses the sabotaged boot (`result:
