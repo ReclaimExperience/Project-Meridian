@@ -148,7 +148,50 @@ numbers in it. Set the deadline at **slowest observed × 2** on the low-end row
 a machine. Note the trade-off is real in both directions: at 300s the rollback
 drill overruns its own 900s patience because greenboot needs ~3 attempts.
 
-### 4.2 Why does CI's `boottime` disagree with the screenshots? ← START HERE
+### 4.2 RESOLVED — the health check deadlocks against itself
+
+Read out of systemd's own job list, on a booted machine, through a channel
+whose commands demonstrably executed:
+
+```text
+JOB UNIT                          TYPE  STATE
+378 greenboot-healthcheck.service start running
+158 multi-user.target             start waiting
+157 graphical.target              start waiting
+display-manager.service:          active
+failed units:                     (none)
+```
+
+**The check waits for `graphical.target`. `graphical.target` requires
+`multi-user.target`. `multi-user.target` cannot complete while
+`greenboot-healthcheck` is still running, because we ship
+`multi-user.target.wants/greenboot-healthcheck.service`. The check is waiting
+for something that cannot happen until the check finishes.**
+
+Everything else follows from this:
+
+* the target is `waiting`, never `active`, so the wait always runs to its
+  deadline — 90s or 300s, the number never mattered;
+* the check then fails, greenboot reboots, a boot attempt is spent, and enough
+  of those is the brick;
+* `is-failed graphical.target` was also wrong: a *waiting* target is not a
+  failed one;
+* the greeter is up the whole time (`display-manager.service: active`), which
+  is why the photographs show a working login screen while the measurement
+  reported the desktop never arriving. Both were true.
+
+The ~80s figure that made the deadline look like the cause was measured by
+running the script BY HAND from a logged-in shell, after boot had settled — a
+state in which the deadlock cannot occur. The measurement was real and the
+conditions were not the ones greenboot runs in.
+
+**Consequence for the fix:** the check must never wait on anything that
+transitively depends on the check completing. Assert the greeter
+(`display-manager.service`, active within seconds and outside the cycle), and
+detect a broken boot from *failed units*, not from a target that is structurally
+prevented from activating.
+
+### 4.2b Superseded: why CI's boottime disagreed with the screenshots
 
 Local boot of the CI image shows a greeter at 60s. CI's `boottime` says
 `graphical.target` never activates in 420s, with only 2 unanswered polls out of
@@ -181,14 +224,14 @@ rootless store, leaving root-owned files). Unverified since.
 
 ## 5. Where things are
 
-- Branch `wp/05-theme-core`, 50 commits, unmerged.
-- CI artifacts: `meridian-qcow2-x86_64` (~4.9 GB, 5-day retention),
+* Branch `wp/05-theme-core`, 50 commits, unmerged.
+* CI artifacts: `meridian-qcow2-x86_64` (~4.9 GB, 5-day retention),
   `rollback-drill-evidence` (serial logs + JSON reports).
-- Local evidence: `build/evidence/` — `ci-boot-*.png`, serial logs, reports.
-- Probe tooling: `tests/harness/probe.sh` / `probe-status.sh` (PID file, exit
+* Local evidence: `build/evidence/` — `ci-boot-*.png`, serial logs, reports.
+* Probe tooling: `tests/harness/probe.sh` / `probe-status.sh` (PID file, exit
   sentinel, unbuffered output, warns when a live process goes silent).
-- The health check: `os/rootfs/usr/lib/greenboot/check/required.d/10-meridian-desktop.sh`
-- The boot floor: `os/rootfs/usr/libexec/meridian-boot-floor` + its unit.
+* The health check: `os/rootfs/usr/lib/greenboot/check/required.d/10-meridian-desktop.sh`
+* The boot floor: `os/rootfs/usr/libexec/meridian-boot-floor` + its unit.
 
 ## 6. Honest assessment of how this went
 
