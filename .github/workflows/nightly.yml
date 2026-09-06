@@ -202,8 +202,54 @@ jobs:
       # the greenboot deadline has to come from, on the image just built —
       # in CI, because that is where a fresh image and its per-build
       # credentials already sit together.
+      # Captured ONLY on failure, and deliberately never acted on in the same
+      # commit that adds it. The disk build is intermittent — the same config
+      # has produced successes and two different errors — and every fix made to
+      # it so far was inferred from a single red run and was wrong. Collect
+      # several failures, read them, then diagnose.
+      - name: Capture state on a failed disk build
+        if: failure()
+        run: |
+          mkdir -p build/failure-state
+          {
+            echo "=== date ==="; date -u
+            echo "=== disk ==="; df -h / /mnt /var/lib/containers 2>&1
+            echo "=== kvm ==="; ls -la /dev/kvm 2>&1 || echo "NO /dev/kvm"
+            echo "=== rootless podman ==="
+            podman info 2>&1 | head -40
+            echo "=== root podman (explicit conf) ==="
+            sudo env HOME=/root \
+              CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf \
+              podman info 2>&1 | head -40
+            echo "=== store on disk ==="
+            sudo ls -la /var/lib/containers/storage 2>&1 | head -20
+            findmnt -no SOURCE,TARGET /var/lib/containers/storage 2>&1 || true
+            echo "=== images ==="
+            sudo env HOME=/root \
+              CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf \
+              podman images 2>&1 | head -10
+            echo "=== concurrent podman ==="; pgrep -a podman 2>&1 || echo none
+          } > build/failure-state/disk-build.txt 2>&1
+          echo "captured $(wc -l < build/failure-state/disk-build.txt) lines"
+
+      - name: Upload failure state
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: disk-build-failure-state
+          path: build/failure-state/
+          if-no-files-found: warn
+
       - name: Boot timing
         run: python3 tests/harness/run.py boottime --arch x86_64
+
+      # Before the rollback drill, which mutates the disk. bootfloor runs on
+      # its own copy-on-write overlay, so it cannot poison what follows — and
+      # its cure phase (corrupt the boot environment, assert the machine still
+      # boots) has never executed on a machine. meridian-boot-floor has unit
+      # tests and nothing else.
+      - name: Boot floor drill
+        run: python3 tests/harness/run.py bootfloor --arch x86_64
 
       - name: Rollback drill
         run: bash ci/rollback-drill.sh x86_64

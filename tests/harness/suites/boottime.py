@@ -44,6 +44,18 @@ def run(vm: VM, credentials: dict) -> None:
     # A diagnostic that only runs when everything went well is not a diagnostic.
     for label, cmd in (
         ("default target", "systemctl get-default 2>&1"),
+        # Ask directly, so the answer cannot be lost to truncation: did OUR
+        # script speak, and what did it say? `Result=success` proves greenboot's
+        # runner exited 0, which requires every REQUIRED check to have passed —
+        # but it does not name which checks ran.
+        (
+            "our check's own lines",
+            (
+                "journalctl -b --no-pager 2>&1 | grep -cE "
+                "'greeter serving|desktop health checks passed' "
+                "| sed 's/^/matches: /'"
+            ),
+        ),
         # Does OUR health check actually run, and what does it decide? Its
         # output never reaches the serial console — greenboot captures it into
         # the journal — so a 7000-line transcript with none of our lines in it
@@ -78,7 +90,11 @@ def run(vm: VM, credentials: dict) -> None:
         ),
     ):
         _s, out = console.run(cmd, timeout=120)
-        print(f"boottime[early]: {label}\n{out.strip()[:400]}\n", flush=True)
+        # The journal entry needs more room than the rest: truncating it at 400
+        # characters cut off exactly the lines that say whether OUR check ran,
+        # which is the question the dump was added to answer.
+        cap = 1600 if "journal" in label else 400
+        print(f"boottime[early]: {label}\n{out.strip()[:cap]}\n", flush=True)
 
     _s, mask = console.run(
         "systemctl is-enabled NetworkManager-wait-online.service 2>&1", timeout=90
