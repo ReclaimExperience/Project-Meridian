@@ -50,12 +50,63 @@ exit 0
 
 # (name, files to create, expect_pass, must_mention)
 CASES = [
-    ("greeter serving, nothing failed", {"greeter_up": "", "graphical_deps": "display-manager.service\nudisks2.service\n", "failed": ""}, True, "greeter serving"),
-    ("SABOTAGE: a graphical dep has failed", {"greeter_up": "", "graphical_deps": "meridian-drill-sabotage.service\ndisplay-manager.service\n", "failed": "meridian-drill-sabotage.service loaded failed failed Sabotage\n"}, False, "depends on failed unit"),
-    ("unrelated unit failed — must NOT roll back", {"greeter_up": "", "graphical_deps": "display-manager.service\n", "failed": "some-unrelated.service loaded failed failed Thing\n"}, True, "greeter serving"),
-    ("restarting unit is not 'failed' — must NOT roll back", {"greeter_up": "", "graphical_deps": "flaky.service\ndisplay-manager.service\n", "failed": ""}, True, "greeter serving"),
-    ("nothing up, nothing failed — ambiguous, times out", {"graphical_deps": "display-manager.service\n", "failed": ""}, False, "ambiguous case"),
-    ("greeter up but NetworkManager disabled", {"greeter_up": "", "graphical_deps": "display-manager.service\n", "failed": "", "nm_disabled": ""}, False, "cannot get online"),
+    (
+        "greeter serving, nothing failed",
+        {
+            "greeter_up": "",
+            "graphical_deps": "display-manager.service\nudisks2.service\n",
+            "failed": "",
+        },
+        True,
+        "greeter serving",
+    ),
+    (
+        "SABOTAGE: a graphical dep has failed",
+        {
+            "greeter_up": "",
+            "graphical_deps": "meridian-drill-sabotage.service\ndisplay-manager.service\n",
+            "failed": "meridian-drill-sabotage.service loaded failed failed Sabotage\n",
+        },
+        False,
+        "depends on failed unit",
+    ),
+    (
+        "unrelated unit failed — must NOT roll back",
+        {
+            "greeter_up": "",
+            "graphical_deps": "display-manager.service\n",
+            "failed": "some-unrelated.service loaded failed failed Thing\n",
+        },
+        True,
+        "greeter serving",
+    ),
+    (
+        "restarting unit is not 'failed' — must NOT roll back",
+        {
+            "greeter_up": "",
+            "graphical_deps": "flaky.service\ndisplay-manager.service\n",
+            "failed": "",
+        },
+        True,
+        "greeter serving",
+    ),
+    (
+        "nothing up, nothing failed — ambiguous, times out",
+        {"graphical_deps": "display-manager.service\n", "failed": ""},
+        False,
+        "ambiguous case",
+    ),
+    (
+        "greeter up but NetworkManager disabled",
+        {
+            "greeter_up": "",
+            "graphical_deps": "display-manager.service\n",
+            "failed": "",
+            "nm_disabled": "",
+        },
+        False,
+        "cannot get online",
+    ),
 ]
 
 
@@ -89,16 +140,22 @@ def main() -> int:
             output = proc.stdout + proc.stderr
             if passed != expect_pass:
                 verb = "passed" if passed else "failed"
-                print(f"FAIL [{name}]: check {verb}, expected the opposite\n  {output.strip()[:300]}")
+                print(
+                    f"FAIL [{name}]: check {verb}, expected the opposite\n  {output.strip()[:300]}"
+                )
                 failures += 1
             elif mention not in output:
-                print(f"FAIL [{name}]: expected {mention!r} in output:\n  {output.strip()[:300]}")
+                print(
+                    f"FAIL [{name}]: expected {mention!r} in output:\n  {output.strip()[:300]}"
+                )
                 failures += 1
 
     if failures:
         print(f"health-check: {failures} failure(s)")
         return 1
-    print(f"health-check: {len(CASES)} states — sabotage fails fast, transients and unrelated failures do not")
+    print(
+        f"health-check: {len(CASES)} states — sabotage fails fast, transients and unrelated failures do not"
+    )
     return 0
 
 
