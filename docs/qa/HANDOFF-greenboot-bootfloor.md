@@ -106,21 +106,25 @@ all harness artifacts**, none real:
 | Counter 3→2, `boot_success=0` | grubenv read before greenboot finished |
 
 ### 3.1 `wait_until` aborted on a slow poll — FIXED
+
 Each poll ran with `timeout=min(60, timeout)` and let `ConsoleError` propagate
 out of the wait. One slow reply killed a 420s wait at 60s with "command timed
 out", which reads as the machine having rebooted. It was load. This is the
 primitive every suite waits on.
 
 ### 3.2 Persistent masks contaminated the golden disk — FIXED
+
 The theme suite masks greenboot with `--runtime`; a manual repair did it
 *without*, so the mask persisted in `/etc` and survived every later run,
 silencing the mechanism `bootfloor` measures. `bootfloor` now refuses to run on a
 disk whose greenboot is masked.
 
 ### 3.3 Destructive suites shared one mutable disk — FIXED
+
 `bootfloor` and `rollback` now run on a copy-on-write overlay.
 
 ### 3.4 Console commands typed into a login prompt — NOT FIXED
+
 After a reboot mid-suite the shell session is gone, and `console.run` types into
 `fedora login:`. The serial log shows commands sitting there verbatim, never
 executed, while the harness waits for a sentinel that cannot come. **Every such
@@ -128,6 +132,7 @@ executed, while the harness waits for a sentinel that cannot come. **Every such
 findings more than once.** The harness needs to detect a reboot and re-login.
 
 ### 3.5 Serial output stops at `plymouth-quit`
+
 Console mirroring ends there, so `Reached target Graphical Interface` never
 appears in ANY serial log regardless of whether it happened. Absence of a marker
 in the serial log is not evidence of absence. This produced at least two false
@@ -136,6 +141,7 @@ conclusions.
 ## 4. Open, with the exact next step
 
 ### 4.1 The deadline is still a guess
+
 300s is provisional. PRD 10.2 now has a `Boot→greeter (measured)` column with no
 numbers in it. Set the deadline at **slowest observed × 2** on the low-end row
 (4 GB Celeron/eMMC). Do not tighten by guessing — 90s was guessed and it bricked
@@ -143,6 +149,7 @@ a machine. Note the trade-off is real in both directions: at 300s the rollback
 drill overruns its own 900s patience because greenboot needs ~3 attempts.
 
 ### 4.2 Why does CI's `boottime` disagree with the screenshots? ← START HERE
+
 Local boot of the CI image shows a greeter at 60s. CI's `boottime` says
 `graphical.target` never activates in 420s, with only 2 unanswered polls out of
 ~140. One of these is wrong. Candidates: CI's VM differs (KVM availability,
@@ -151,12 +158,14 @@ misleading (see 3.4). **Resolve this before touching the health check again** �
 every conclusion about the check depends on it.
 
 ### 4.3 The rollback drill has never passed on this branch
+
 Latest attempt: the check correctly refuses the sabotaged boot (`result:
 activating`, `failed units=4`) but takes the full 300s, so rollback needs ~20
 minutes and exceeds the drill's 900s window. Either shorten the deadline (4.1) or
 raise the drill's patience to exceed `max_attempts × (boot + deadline)`.
 
 ### 4.4 `bootfloor` has never reached its cure phase
+
 The prevention phase (counter must reset) fails first. The cure phase — corrupt
 grubenv, assert the machine still boots — has not run once, so
 `meridian-boot-floor` is **untested on a machine**. It has unit tests
@@ -165,6 +174,7 @@ grubenv, assert the machine still boots — has not run once, so
 ### 4.5 The intermittent disk build (2.4)
 
 ### 4.6 `nightly-x86_64` fails at `Build image`
+
 Its sibling job builds the same image from the same script successfully. One
 known cause was fixed (a diagnostic step running root podman against the
 rootless store, leaving root-owned files). Unverified since.

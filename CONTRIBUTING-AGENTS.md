@@ -101,6 +101,31 @@ You are one agent executing exactly one work package (or one clearly-named slice
   shows, or does it decide something the mockup is silent about?* Only the
   second is authority.
 
+- **R-L: A result is evidence only if the command demonstrably ran.** The
+  harness talks to the machine over a serial console, and a console is a
+  *channel* — it can be gone while still accepting keystrokes. When the machine
+  reboots mid-suite, which greenboot does deliberately, the login session dies
+  and every subsequent command is typed into `login:` as a username. No result
+  can come back, so the harness times out and reports:
+
+      command timed out after 60s: 'systemctl is-active graphical.target'
+
+  That reads as a slow machine. It was written up as a product defect more than
+  once — including the claim that `graphical.target` never activates, while
+  photographs of the same image showed a working greeter at 60 seconds.
+
+  So: **distrust every "X never happens" that does not cite a command which
+  demonstrably executed.** `Console.run` now brackets output with sentinels that
+  only real execution can produce, raises `ChannelLost` — a *different*
+  exception from a timeout — when the console is not at a shell, and
+  re-establishes the session once rather than reporting a phantom.
+
+  The general form, beyond consoles: an instrument that cannot tell "I measured
+  nothing" from "there was nothing to measure" will eventually report the second
+  when it means the first, and it will be believed. Six "product defects" in
+  WP-05 were artifacts of this class. When an instrument and a photograph
+  disagree, the photograph wins.
+
 ### 14.4 Context discipline (you are an Opus 5 medium agent; budget accordingly)
 Load only listed inputs; grep before reading whole files; summarize long tool output into your working notes instead of re-reading; if context tightens, STOP at a clean commit + STATUS.md "Open threads" + hand off rather than degrading quality. An L-size WP expects 5–8 sessions — plan your slice to land something verified each session.
 

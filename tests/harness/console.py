@@ -67,6 +67,22 @@ class ConsoleError(RuntimeError):
     pass
 
 
+class ChannelLost(ConsoleError):
+    """The command never executed — the console is not at a shell.
+
+    Deliberately a different exception from a timeout, because they mean
+    opposite things and were indistinguishable for most of WP-05. When a suite
+    reboots the machine (or greenboot does), the login session dies and every
+    subsequent `run` is TYPED INTO `login:`. No sentinel can ever come back, so
+    the harness waited out its timeout and reported "command timed out" — which
+    reads as a slow machine and was repeatedly written up as a product finding.
+    The serial logs show the commands sitting at the login prompt, verbatim,
+    never executed.
+
+    A result is only evidence if the command demonstrably ran.
+    """
+
+
 class Console:
     """A bidirectional serial console."""
 
@@ -221,6 +237,10 @@ class Console:
         self.send_line(user)
         self.wait_for(PASSWORD_PROMPT, timeout=30)
         self.send_line(password)
+        # Remembered so `run` can re-establish the session after a reboot. A
+        # channel that cannot recover from the machine restarting is not usable
+        # for testing a machine whose whole subject is restarting.
+        self._credentials = (user, password)
         # A wrong password re-prompts rather than erroring, so watch for both.
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
@@ -282,7 +302,9 @@ class Console:
             f"  polls that got no reply in time: {slow}"
         )
 
-    def run(self, command: str, timeout: float = 60.0) -> tuple[int, str]:
+    def run(
+        self, command: str, timeout: float = 60.0, _retry: bool = False
+    ) -> tuple[int, str]:
         """Run a command, returning (exit_status, output).
 
         Output is bracketed by a PAIR of sentinels, and the marker is assembled
@@ -327,8 +349,47 @@ class Console:
                 return int(match.group(1)), body.strip()
             time.sleep(0.3)
 
-        tail = "\n  ".join(self._clean().strip().split("\n")[-25:])
+        clean = self._clean()
+        tail = "\n  ".join(clean.strip().split("\n")[-25:])
+
+        # Did the command execute at all? If the console is sitting at a login
+        # prompt, it did not: it was typed as a username. Say so, and try once
+        # to get the session back, because the alternative is reporting a
+        # phantom about a machine that is fine.
+        # What a lost session actually looks like: the command was typed as a
+        # USERNAME, so login answers "Password:", eats the next line, says
+        # "Login incorrect" and prompts again. Any of those means no shell.
+        lost = bool(
+            LOGIN_PROMPT.search(clean)
+            or PASSWORD_PROMPT.search(clean)
+            or re.search(r"Login incorrect", clean, re.IGNORECASE)
+        )
+        if lost and not _retry:
+            credentials = getattr(self, "_credentials", None)
+            if credentials:
+                print(
+                    "console: the session is gone (login prompt on screen) — "
+                    "the machine rebooted under us. Logging back in and "
+                    "retrying once."
+                )
+                self.login(*credentials, timeout=300)
+                return self.run(command, timeout=timeout, _retry=True)
+            raise ChannelLost(
+                f"{command!r} was typed at a login prompt, not a shell, so it "
+                "never ran. No credentials were remembered, so the session "
+                "cannot be re-established.\n"
+                f"Last of the console:\n  {tail}"
+            )
+        if lost:
+            raise ChannelLost(
+                f"{command!r} still could not run after re-login: the console "
+                "is at a login prompt.\n"
+                f"Last of the console:\n  {tail}"
+            )
+
         raise ConsoleError(
             f"command timed out after {timeout:.0f}s: {command!r}\n"
+            f"  (a shell was present, so this is genuinely slow, not a lost "
+            f"session)\n"
             f"Last of the console:\n  {tail}"
         )
