@@ -120,6 +120,47 @@ jobs:
   #
   # It is a REQUIRED nightly job, not advisory. ADR-008's self-healing promise is
   # either mechanically true every night or it is not a promise.
+  # The aarch64 disk image exists for ONE reason: on Apple Silicon it runs
+  # under HVF, so it is the only build a person can judge responsiveness on.
+  # x86_64 under emulation on a Mac answers "does it work" and nothing about
+  # speed. See docs/qa/TEST-DRIVE.md.
+  #
+  # Built on a native arm64 runner because bootc-image-builder cannot
+  # cross-build. No suites run against it here — it is a hands-on artifact, and
+  # the x86_64 image remains the one the automated gates exercise.
+  qcow2-aarch64:
+    name: qcow2-aarch64
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: extractions/setup-just@v3
+      - name: Install build tools
+        run: sudo apt-get install -y -qq skopeo
+      - name: Prepare runner storage
+        run: bash ci/prepare-runner.sh
+      - name: Log in to GHCR
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
+      - name: Build the image under test
+        run: bash ci/build.sh aarch64
+      - name: Build the disk image
+        run: |
+          sudo env "PATH=${PATH}" "HOME=/root" \
+            "CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf" \
+            just vm-image aarch64
+          sudo chown -R "$(id -u):$(id -g)" build
+      - name: Upload the bootable disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: meridian-qcow2-aarch64
+          path: build/qcow2/*.qcow2
+          compression-level: 0
+          retention-days: 5
+          if-no-files-found: error
+
   rollback-drill:
     name: rollback-drill
     runs-on: ubuntu-latest
