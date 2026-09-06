@@ -42,6 +42,34 @@ jobs:
       - name: Log in to GHCR
         run: echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
 
+      # Three wrong fixes have been made to the container-store path by
+      # reasoning about it. This prints what is actually true, so the next
+      # failure is diagnosed from evidence rather than from a fourth guess.
+      - name: Container store facts
+        run: |
+          echo "user  graphroot: $(podman info --format '{{ .Store.GraphRoot }}')"
+          # Every root podman call here passes CONTAINERS_STORAGE_CONF.
+          # Without it, root resolves to the ROOTLESS graphroot (measured), and
+          # running podman as root against the user's store leaves root-owned
+          # files in it — after which the rootless build dies with
+          #   chown /mnt/containers/storage/overlay/l: operation not permitted
+          # This diagnostic step did exactly that and broke the build it was
+          # added to diagnose.
+          echo "root  graphroot: $(sudo env HOME=/root \
+            CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf \
+            podman info --format '{{ .Store.GraphRoot }}')"
+
+          echo "--- configs root could be reading ---"
+          for f in /etc/containers/storage.conf /root/.config/containers/storage.conf \
+                   "$HOME/.config/containers/storage.conf"; do
+            echo "== $f"; sudo cat "$f" 2>/dev/null || echo "   (absent)"
+          done
+          echo "--- mounts ---"
+          findmnt -no SOURCE,TARGET /var/lib/containers/storage || echo "   (not a mount)"
+          echo "--- store databases ---"
+          sudo find /var/lib/containers/storage /mnt/containers -maxdepth 2 \
+               -name 'libpod' -o -maxdepth 2 -name '*.db' 2>/dev/null | head
+
       - name: Build image
         run: bash ci/build.sh x86_64
 
@@ -92,6 +120,47 @@ jobs:
   #
   # It is a REQUIRED nightly job, not advisory. ADR-008's self-healing promise is
   # either mechanically true every night or it is not a promise.
+  # The aarch64 disk image exists for ONE reason: on Apple Silicon it runs
+  # under HVF, so it is the only build a person can judge responsiveness on.
+  # x86_64 under emulation on a Mac answers "does it work" and nothing about
+  # speed. See docs/qa/TEST-DRIVE.md.
+  #
+  # Built on a native arm64 runner because bootc-image-builder cannot
+  # cross-build. No suites run against it here — it is a hands-on artifact, and
+  # the x86_64 image remains the one the automated gates exercise.
+  qcow2-aarch64:
+    name: qcow2-aarch64
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: extractions/setup-just@v3
+      - name: Install build tools
+        run: sudo apt-get install -y -qq skopeo
+      - name: Prepare runner storage
+        run: bash ci/prepare-runner.sh
+      - name: Log in to GHCR
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
+      - name: Build the image under test
+        run: bash ci/build.sh aarch64
+      - name: Build the disk image
+        run: |
+          sudo env "PATH=${PATH}" "HOME=/root" \
+            "CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf" \
+            just vm-image aarch64
+          sudo chown -R "$(id -u):$(id -g)" build
+      - name: Upload the bootable disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: meridian-qcow2-aarch64
+          path: build/qcow2/*.qcow2
+          compression-level: 0
+          retention-days: 5
+          if-no-files-found: error
+
   rollback-drill:
     name: rollback-drill
     runs-on: ubuntu-latest
@@ -102,7 +171,15 @@ jobs:
       - uses: actions/checkout@v5
       - uses: extractions/setup-just@v3
       - name: Install build tools
-        run: sudo apt-get install -y -qq qemu-system-x86 ovmf skopeo
+        run: |
+          sudo apt-get install -y -qq qemu-system-x86 ovmf skopeo
+          # The harness imports numpy and pillow for frame analysis. This job
+          # did not install them, so every rollback drill died on
+          # `ModuleNotFoundError: No module named 'numpy'` AFTER a full image
+          # build — ten minutes spent to fail on a missing dependency. Same
+          # class as the lint job that lacked pillow.
+          python3 -m pip install --quiet --break-system-packages \
+            jsonschema PyYAML pillow numpy
       - name: Prepare runner storage
         run: bash ci/prepare-runner.sh
       - name: Log in to GHCR
@@ -110,8 +187,111 @@ jobs:
           echo '${{ secrets.GITHUB_TOKEN }}' | podman login ghcr.io -u '${{ github.actor }}' --password-stdin
       - name: Build the image under test
         run: bash ci/build.sh x86_64
+      # OBSERVATION ONLY — deliberately changes nothing.
+      #
+      # "Build the disk image" has now failed two ways with the SAME config:
+      #   database graph driver "" does not match our graph driver "overlay"
+      #   database static dir "/mnt/..." does not match "/var/lib/..."
+      # and succeeded twice. That is intermittent, and every fix so far has
+      # been aimed at a mechanism inferred from one red run. Worse, the last
+      # attempt changed two things at once, so its result was unattributable.
+      #
+      # This step prints the store's actual state immediately before the build.
+      # No fix accompanies it, so whatever the next run shows is attributable.
+      - name: Root store state before the disk build
+        run: |
+          CONF=/etc/containers/storage-root.conf
+          echo "--- config we intend root to use ---"; sudo cat "$CONF" 2>&1 || true
+          echo "--- what root actually resolves ---"
+          sudo env HOME=/root CONTAINERS_STORAGE_CONF="$CONF" \
+            podman info --format 'graphroot={{ .Store.GraphRoot }} driver={{ .Store.GraphDriverName }} conf={{ .Store.ConfigFile }}' 2>&1 || true
+          echo "--- store contents ---"
+          sudo ls -la /var/lib/containers/storage 2>&1 | head -12
+          echo "--- is the bind mount there ---"
+          findmnt -no SOURCE,TARGET /var/lib/containers/storage 2>&1 || echo "(not mounted)"
+          echo "--- images root can see ---"
+          sudo env HOME=/root CONTAINERS_STORAGE_CONF="$CONF" \
+            podman images --format '{{ .Repository }}:{{ .Tag }}' 2>&1 | head -5 || true
+
       - name: Build the disk image
         run: bash ci/vm-test.sh x86_64 smoke
+
+      # CI is the authority on what ships; a local build is only an
+      # accelerator. Publishing the disk here means the visual review and the
+      # VM suites can run against the artifact that was actually built from
+      # main, on a machine with no local privilege — and it unblocks anyone
+      # without rootful podman, which bootc-image-builder requires and which a
+      # dev box may reasonably not grant.
+      #
+      # Uploaded BEFORE the drill: the drill deliberately stages a sabotage
+      # image and rolls back, so the disk it leaves behind is mutated boot
+      # state, not a clean image.
+      #
+      # compression-level 0 because qcow2 is already zlib-compressed; zipping
+      # it again spends minutes to save nothing. Retention is short because
+      # the file is multi-gigabyte and a stale disk is worse than no disk.
+      - name: Upload the bootable disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: meridian-qcow2-x86_64
+          path: build/qcow2/*.qcow2
+          compression-level: 0
+          retention-days: 5
+          if-no-files-found: error
+
+      # Runs BEFORE the drill, which mutates boot state. Measures the number
+      # the greenboot deadline has to come from, on the image just built —
+      # in CI, because that is where a fresh image and its per-build
+      # credentials already sit together.
+      # Captured ONLY on failure, and deliberately never acted on in the same
+      # commit that adds it. The disk build is intermittent — the same config
+      # has produced successes and two different errors — and every fix made to
+      # it so far was inferred from a single red run and was wrong. Collect
+      # several failures, read them, then diagnose.
+      - name: Capture state on a failed disk build
+        if: failure()
+        run: |
+          mkdir -p build/failure-state
+          {
+            echo "=== date ==="; date -u
+            echo "=== disk ==="; df -h / /mnt /var/lib/containers 2>&1
+            echo "=== kvm ==="; ls -la /dev/kvm 2>&1 || echo "NO /dev/kvm"
+            echo "=== rootless podman ==="
+            podman info 2>&1 | head -40
+            echo "=== root podman (explicit conf) ==="
+            sudo env HOME=/root \
+              CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf \
+              podman info 2>&1 | head -40
+            echo "=== store on disk ==="
+            sudo ls -la /var/lib/containers/storage 2>&1 | head -20
+            findmnt -no SOURCE,TARGET /var/lib/containers/storage 2>&1 || true
+            echo "=== images ==="
+            sudo env HOME=/root \
+              CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf \
+              podman images 2>&1 | head -10
+            echo "=== concurrent podman ==="; pgrep -a podman 2>&1 || echo none
+          } > build/failure-state/disk-build.txt 2>&1
+          echo "captured $(wc -l < build/failure-state/disk-build.txt) lines"
+
+      - name: Upload failure state
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: disk-build-failure-state
+          path: build/failure-state/
+          if-no-files-found: warn
+
+      - name: Boot timing
+        run: python3 tests/harness/run.py boottime --arch x86_64
+
+      # Before the rollback drill, which mutates the disk. bootfloor runs on
+      # its own copy-on-write overlay, so it cannot poison what follows — and
+      # its cure phase (corrupt the boot environment, assert the machine still
+      # boots) has never executed on a machine. meridian-boot-floor has unit
+      # tests and nothing else.
+      - name: Boot floor drill
+        run: python3 tests/harness/run.py bootfloor --arch x86_64
+
       - name: Rollback drill
         run: bash ci/rollback-drill.sh x86_64
       - name: Upload drill evidence

@@ -55,6 +55,34 @@ CONF
 sudo mkdir -p "${STORAGE_ROOT}/storage-root" /var/lib/containers/storage
 sudo mount --bind "${STORAGE_ROOT}/storage-root" /var/lib/containers/storage
 
+# And say so EXPLICITLY, in a file whose path we pass to podman directly.
+#
+# Relying on root resolving its own config was wrong three times. Measured on
+# the runner: with HOME=/root, no /etc/containers/storage.conf and no
+# /root/.config/containers/storage.conf, `sudo podman info` still reported
+# graphroot=/mnt/containers/storage — the rootless value — so root was reading
+# the invoking user's config by some path that is not worth reverse-engineering.
+# CONTAINERS_STORAGE_CONF leaves nothing to resolve.
+sudo mkdir -p /etc/containers
+sudo tee /etc/containers/storage-root.conf >/dev/null <<CONF
+[storage]
+# The driver line stays. Runs 33947223804 and 33949149449 both built the qcow2
+# successfully WITH it — those are the only two successful disk builds this
+# project has ever had. It was removed after a single failure
+# (database graph driver "" does not match our graph driver "overlay"), and
+# removing it brought back the original static-dir mismatch, which is worse and
+# is the failure this whole config exists to prevent.
+#
+# The driver-mismatch run is unexplained and recorded as such: it most likely
+# hit a store that had never been initialised, since the preceding job step had
+# already failed. That is a hypothesis, not a finding. Do not remove this line
+# again without evidence stronger than one red run.
+driver = "overlay"
+graphroot = "/var/lib/containers/storage"
+runroot = "/run/containers/storage"
+CONF
+echo "root store config: /etc/containers/storage-root.conf -> /var/lib/containers/storage"
+
 echo "after:"
 df -h / /mnt 2>/dev/null | sed 's/^/  /'
 echo "podman graphroot: $(podman info --format '{{ .Store.GraphRoot }}')"

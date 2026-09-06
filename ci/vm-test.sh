@@ -64,14 +64,31 @@ IMAGE="$(python3 -c "import json;d=json.load(open('${BRANDING}'));print(d['regis
 LOCAL_REF="${IMAGE}:testing-${ARCH}"
 
 if [[ "$(podman info --format '{{ .Host.Security.Rootless }}')" == "true" ]]; then
-    SUDO=(sudo -E env "PATH=${PATH}")
+    # HOME is set explicitly, and -E is NOT used. `sudo -E` preserves the
+    # caller's HOME, so root's podman then reads the USER's
+    # ~/.config/containers/storage.conf — the one ci/prepare-runner.sh writes
+    # with graphroot on /mnt. Rootful podman would report that graphroot, the
+    # store's database would record /mnt/..., and bootc-image-builder would be
+    # handed a store whose recorded path disagreed with where it was mounted:
+    #
+    #   database static dir "/mnt/containers/storage/libpod" does not match
+    #   our static dir "/var/lib/containers/storage/libpod"
+    #
+    # prepare-runner.sh already solves this properly for the rootful store by
+    # bind-mounting the big volume UNDER the canonical path. `-E` was quietly
+    # undoing that. PATH is still passed through, which is all -E was wanted for.
+    # CONTAINERS_STORAGE_CONF names the store explicitly, because root does
+    # NOT reliably resolve to /var/lib/containers/storage on its own here —
+    # measured, not assumed (see ci/prepare-runner.sh).
+    SUDO=(sudo env "PATH=${PATH}" "HOME=/root"
+          "CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf")
     if "${SUDO[@]}" podman image exists "${LOCAL_REF}"; then
         echo "  ${LOCAL_REF} is already in rootful storage; no transfer needed"
     else
         echo "  ${LOCAL_REF} is only in the rootless store — transferring."
         echo "  This copies ~8.7 GiB and takes about four minutes. It happens"
         echo "  when the image was built rootless; CI builds rootful to skip it."
-        podman save "${LOCAL_REF}" | sudo podman load
+        podman save "${LOCAL_REF}" | "${SUDO[@]}" podman load
     fi
 else
     SUDO=()

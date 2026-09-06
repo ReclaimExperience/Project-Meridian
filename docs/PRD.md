@@ -235,7 +235,7 @@ The complete machine-readable token set is **Appendix A** (`docs/design/tokens.j
 - **Ink:** primary `#1a1a22`; secondary `#55555f`; tertiary `#7a7a86`; disabled/hint `#9a9aa6`.
 - **Accents (user-selectable, default blue):** blue `#0098c0` · violet `#7f78d6` · green `#019f68` · red `#cd605a` · graphite `#4f5661`. (Authored as OKLCH 0.62/0.14/{220,285,160,25} + 0.45/0.02/260 — keep OKLCH authoritative in tokens, ship hex to Qt.) Close-button hover is always `#e5484d` white glyph.
 - **Dark theme (Meridian Dark — our derivation; mockup is light-only):** base `#131318`; window `#1c1c24` at 94%; sidebar `#17171f`/60%; hairlines `rgba(255,255,255,0.07)`; ink `#ececf2`/`#b8b8c4`/`#8f8f9c`; accents same hues lightened one step (L+0.08). Both themes ship in 1.0; light is default; toggle lives in Settings → Appearance.
-- **Wallpapers (3, shipped as 4K PNG + source SVG gradients):** Soft Violet `#c3bfe3 → #6d7ac2 (55%) → #2c488e` at 160°; Dusk `#ecc5a7 → #bd615b (60%) → #4b346f`; Deep Teal `#90cacd → #008192 (55%) → #003f64`. Plus both theme-neutral radial glows per mockup.
+- **Wallpapers (3, shipped as 4K PNG + source SVG gradients):** Soft Violet `#c3bfe3 → #6d7ac2 (55%) → #2c488e` at 160°; Dusk `#ecc5a7 → #bd615b (60%) → #4b346f`; Deep Teal `#90cacd → #008192 (55%) → #003f64`. Plus both radial glows per mockup, as authored: white `rgba(255,255,255,0.2)` from the top-left (top −20%, left −10%, 60%×70%) and violet `rgba(120,90,200,0.22)` from the bottom-right (bottom −30%, right −15%, 70%×80%), `closest-side`, shared across all three wallpapers. **Not** "theme-neutral" — that word was a translation error in this line, not the mockup's intent; the lower-right glow is violet in the source. Each wallpaper is its own composed asset, so there is no reuse constraint requiring neutrality. If violet-over-teal reads badly, per-wallpaper glows are a later refinement.
 
 ### 4.3 Shape, depth, materials
 
@@ -337,6 +337,8 @@ Pages, in order, each skippable: 1) **Hello** (three-point promise per mockup mo
 6. Store "Popular with switchers" Spotify subtitle "Music streaming" retained but Spotify sits in catalog, not preinstalled.
 7. Quick Settings gains an MPRIS now-playing row (switcher expectation; mockup silent on it).
 8. Workspaces: exactly 3 fixed numbered spaces in 1.0 (no add/remove UI; power users get KWin shortcuts; revisit v1.x).
+9. **App windows are opaque.** The mockup shows faintly translucent app windows (the 94% Files window). QtWidgets backgrounds are opaque, so per-app translucency fights the toolkit for a low-salience gain — approximated opaque and accepted. The mockup's material (94% surfaces over blur) is native only to **panels and Plasma popups**, where it is delivered by the Plasma Style SVGs plus the KWin blur effect: Start menu, Quick Settings, taskbar (WP-07/08/09). Colour schemes carry no alpha at all, and that is correct rather than lossy — KDE widget and window backgrounds are opaque, so the flattened value *is* the value.
+10. **Blur is a known environment variable, pinned before it becomes a mystery diff.** A VM may render the KWin blur effect differently, or not at all, so a screenshot diff against a blur-on mockup can be environmental rather than a defect — the same trap as measuring idle RAM without a GPU (ADR-017). Therefore, once blurred surfaces exist (WP-07): the **regression baseline** is captured in a deterministic blur state, and the **fidelity-vs-mockup review** is done on a true blur-on still. Two different pictures for two different questions; decided here, not discovered later.
 
 ---
 
@@ -851,16 +853,28 @@ Phase 0 ≈ 11 sessions · Phase 1 ≈ 17 · Phase 2 ≈ 22 · Phase 3 ≈ 16 ·
 
 ### 10.2 Hardware matrix (mandatory rows for 1.0; template in `docs/qa/`)
 
-| Class | Reference target | Why |
-|---|---|---|
-| Win10-refugee desktop | Dell OptiPlex 3050 / HP 2016–2017 i5, HDD+SSD | Pat's machine; BIOS+UEFI variants |
-| Win10-refugee laptop | ThinkPad T480 or similar 8th-gen | The canonical switcher laptop |
-| Modern mainstream laptop | 2022+ Ryzen or 12th-gen Intel, Wi-Fi 6 | Sam's class; s2idle + brightness + webcam |
-| Low-end constraint | 4 GB RAM Celeron/Pentium laptop, eMMC | Floor honesty (ADR-013). **Canonical seat for `ram.idle.product` (ADR-017).** |
-| Touch-equipped laptop **(mandatory)** | Any 2-in-1 or touchscreen laptop | ADR-018 §6: the on-screen keyboard is automatic on touch hardware, and this is the only row that can prove it still appears when it should — a touchless machine cannot fail that check. The reworked trim ships to `:testing` on structural greeter safety (nothing writes to `/etc`, the greeter reads none of it); **verification on this seat gates `:stable` for the feature.** |
-| Nvidia desktop | GTX 16xx AND RTX 30xx+ | ADR-012 both driver generations |
-| Trouble-hardware seat | One Broadcom-Wi-Fi Mac or similar | Driver-stack proof |
-| VMs | UTM/aarch64 (dev loop), QEMU-KVM x86_64 (CI), plus one VirtualBox+VMware smoke | Where users will "try it first" |
+| Class | Reference target | Boot→greeter (measured) | Why |
+|---|---|---|---|
+| Win10-refugee desktop | Dell OptiPlex 3050 / HP 2016–2017 i5, HDD+SSD | — | Pat's machine; BIOS+UEFI variants |
+| Win10-refugee laptop | ThinkPad T480 or similar 8th-gen | — | The canonical switcher laptop |
+| Modern mainstream laptop | 2022+ Ryzen or 12th-gen Intel, Wi-Fi 6 | — | Sam's class; s2idle + brightness + webcam |
+| Low-end constraint | 4 GB RAM Celeron/Pentium laptop, eMMC | **required — sets the health-check deadline** | Floor honesty (ADR-013). **Canonical seat for `ram.idle.product` (ADR-017).** |
+| Touch-equipped laptop **(mandatory)** | Any 2-in-1 or touchscreen laptop | — | ADR-018 §6: the on-screen keyboard is automatic on touch hardware, and this is the only row that can prove it still appears when it should — a touchless machine cannot fail that check. The reworked trim ships to `:testing` on structural greeter safety (nothing writes to `/etc`, the greeter reads none of it); **verification on this seat gates `:stable` for the feature.** |
+| Nvidia desktop | GTX 16xx AND RTX 30xx+ | — | ADR-012 both driver generations |
+| Trouble-hardware seat | One Broadcom-Wi-Fi Mac or similar | — | Driver-stack proof |
+| VMs | UTM/aarch64 (dev loop), QEMU-KVM x86_64 (CI), plus one VirtualBox+VMware smoke | ~8s greeter / ~80s graphical.target (llvmpipe) | Where users will "try it first" |
+
+**Boot→greeter is a gating measurement, not a statistic.** greenboot's required
+health check has a deadline, and a machine that misses it is rebooted and has a
+boot attempt spent. Exhaust those and the machine stops booting — one was found
+in that state during WP-05. The deadline is currently **300s, provisional and
+deliberately loose**: the asymmetry is brutal, since too tight bricks a machine
+and too loose only delays a rollback.
+
+Set it from this column once the numbers exist: **slowest observed × 2**, taken
+on the low-end row. Do not tighten it by guessing. Note also that the check
+waits for the GREETER, not for `graphical.target` — on the CI VM those are ~8s
+and ~80s apart, and it was waiting on the latter that produced the brick.
 
 Per-row protocol: live-boot hardware panel → install (path per row) → ZT sampler (01,03,05,06,16,22) → sleep/resume ×10 (laptops) → update+rollback drill → result + quirks logged.
 

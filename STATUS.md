@@ -1010,3 +1010,200 @@ job lacked Pillow), but it moves the boundary out one more step.
 - Not delivered, recorded rather than hidden: OCR text assertions, the vncdotool
   input fallback, and the `perf` suite (blocked on WP-02's scripts).
   **→ `perf` DELIVERED by WP-02 (2026-09-03); OCR and vncdotool remain open.**
+
+---
+
+## Defect found during WP-05: an exhausted boot counter bricks the bootloader
+
+**Severity: this is the product's central claim failing, not a test-rig fault.**
+
+Found 2026-09-04 while capturing theme screenshots. The `theme` suite had been
+failing with `no login prompt within 600s — is a serial getty running?`. A getty
+was never the question. The serial transcript:
+
+```text
+BdsDxe: starting Boot0001 "UEFI Misc Device"
+GRUB version 2.12 ... Meridian OS 1.0.0-dev (ostree:0)
+BdsDxe: starting Boot0000 "UiApp"
+This is the option one adjusts to change the language for the current system
+   ... the same line, several hundred times
+```
+
+GRUB drew its menu, handed control back to the firmware, and BDS fell through to
+the UEFI setup application. Read out of GRUB's own command line:
+
+```text
+boot_counter=-1   boot_success=0   default=1
+```
+
+The greenboot boot-attempt counter is exhausted and negative, `boot_success` was
+never set, and `grub.cfg` has therefore selected fallback entry **index 1 — which
+does not exist**. The menu holds one entry (`ostree:0`). GRUB is pointed at a
+deployment that is not there, so it boots nothing.
+
+**The failure mode:** a machine whose greenboot health check never reports
+success decrements `boot_counter` on every boot. Once it is exhausted, if there
+is no second deployment to fall back to, the machine stops booting entirely — no
+rollback, no recovery, dead at the bootloader with no terminal to fix it from.
+That is the exact outcome PRD §3 (`bootc` + greenboot) exists to make impossible,
+and it is worse for us than for a conventional distro: INV-0 means the owner has
+no terminal, and our recovery story assumes a bootable deployment.
+
+Note what the WP-04 rollback drill did *not* catch. It proved greenboot drives
+`bootc rollback` **when a fallback deployment exists**. It never tested the state
+this machine reached: counter exhausted, single deployment. A green drill and a
+brickable machine coexisted.
+
+**Root cause, established 2026-09-04 by running the check under `bash -x`
+inside the VM:** our own required check `10-meridian-desktop.sh` is a race it
+loses about half the time.
+
+```text
++ elapsed=78 ; systemctl is-active --quiet graphical.target ; [[ 78 -ge 90 ]]
++ elapsed=80 ; systemctl is-active --quiet graphical.target
++ echo 'greenboot: graphical.target reached in under 90s'
+greenboot: desktop health checks passed
+```
+
+The check polls `graphical.target` with a **90-second deadline**. On this VM the
+target takes **~80 seconds** to go active — a ten-second margin. Every boot that
+overruns is judged unhealthy, greenboot reboots the machine (observed on the
+serial console: `Broadcast message from root@fedora: The system will reboot
+now!`, about three minutes into the boot), and `boot_counter` decrements. The
+counter never recovers, so the machine walks itself down to the brick state
+above. Confirmed decrementing in one sitting: 3 → 1 over two boots.
+
+Two things make this worse than a slow boot:
+
+- `graphical.target` is **not the effect we care about**. Throughout those 80
+  seconds `plasmalogin.service` is *already active and running* and
+  `display-manager.service` reports active — the greeter is up and a person
+  could log in. The check is asserting a systemd abstraction that lags the thing
+  it stands for. Rule R-I, and this time we wrote the presence-check ourselves.
+- The likely reason the target lags is `NetworkManager-wait-online.service`,
+  visible in the boot log and default-capped at ~90s. A machine with no network
+  — precisely the case check 3 goes out of its way not to punish — is therefore
+  the *most* likely to be rebooted to death by check 1.
+
+**Still not established (do not assume):**
+
+- Whether a freshly installed machine on real hardware reaches `graphical.target`
+  fast enough to hide this. Faster hardware narrows the race; it does not remove
+  it, and a slow disk or a missing network widens it again.
+- Whether `NetworkManager-wait-online` is the whole delay, or only part.
+- Whether stock greenboot guards against `default` exceeding the menu length.
+
+**Owed, and none of it done yet:**
+
+1. Establish why `boot_success` stays 0 on a healthy boot.
+2. A `bootc`-level guard: never select a fallback index that has no menu entry.
+   Refusing to boot is strictly worse than re-trying a deployment that has
+   already booted.
+3. A test that asserts the effect: a machine with a *failing* health check and a
+   *single* deployment must still reach a shell. Rule R-I — the drill asserted
+   rollback happens, not that the machine survives having nowhere to roll back to.
+
+**The repair applied to the test disk is a workaround, not a fix.** `boot_success`
+and `boot_counter` were reset from the GRUB command line via `save_env`. The disk
+boots again; the defect is untouched and the disk will drift back.
+
+### Harness faults found alongside it
+
+- `Console.login()` nudged with a newline every 10s from the moment it attached.
+  Before Linux owns the serial console the reader is UEFI, then GRUB, where a
+  keystroke is a menu selection. The nudges cycled the firmware's language menu
+  for 600s. Fixed: wait for evidence that userspace owns the console, refuse to
+  type at firmware. The same failure now reports in 4s with its true cause.
+  Regression test: `tests/harness/test_console_firmware.py`.
+- The harness runs against a **mutable golden disk**. The WP-04 drill's boot-state
+  changes persisted into every later run. Suites should boot a copy-on-write
+  overlay so no run can poison the next. **Not yet done.**
+- `VM.stop()` leaked a `qemu-system-x86_64` holding the disk's write lock, which
+  presented as an unrelated "Failed to get write lock". **Not yet fixed.**
+
+---
+
+## WP-05 icon theme: parked mid-diagnosis (2026-09-04)
+
+The `meridian` icon theme applies and the accent folder set visibly replaces
+Breeze's, but **every non-overridden icon loses contrast** — Dolphin's toolbar
+renders near-black on near-black. A `Theme=breeze` control frame is bright, so
+the regression is ours and not the dark scheme, focus state, or anything
+ambient.
+
+Cause, established: **`index.theme` lands as a 0-byte file in the guest**
+(`BYTES=0`), so KDE never reads `Inherits=breeze,hicolor`. Non-overridden icons
+are therefore not inherited-and-recoloured. The file is correct at source — 396
+bytes, git-tracked, correct `[Icon Theme]` header, present on the build box —
+so the fault is in the push/extract path used to install it into a running VM,
+not in the generator.
+
+`FollowsColorScheme=true` was my hypothesis and is **not** the fix: Breeze does
+declare it, but ours was never read at all. Recorded so nobody adds the key and
+believes it fixed something.
+
+**Not verified, therefore not claimed:** that the icon theme works when it is
+part of a built image rather than hand-installed. That needs the CI qcow2.
+
+---
+
+## The image pipeline works (2026-09-05)
+
+CI produced a bootable qcow2 for the first time: run 33947223804, artifact
+`meridian-qcow2-x86_64`, 4,967,956,726 bytes. Uploaded **before** the rollback
+drill runs, because the drill stages a sabotage image and rolls back, so the
+disk it leaves behind is mutated boot state rather than a clean image.
+
+It had never worked. Three causes, found in this order:
+
+1. `ModuleNotFoundError: numpy` — the `rollback-drill` job installed qemu, ovmf
+   and skopeo but not the Python dependencies its sibling job installs. Ten
+   minutes of image build spent to die on an import.
+2. The container store's recorded path did not match where the builder mounted
+   it. Fixed three times by reasoning, wrongly each time.
+3. The actual cause, found only by printing the facts: with `HOME=/root`, no
+   `/etc/containers/storage.conf` and no `/root/.config/containers/storage.conf`,
+   root's podman *still* reported the rootless graphroot. Rather than
+   reverse-engineer how, the store is now NAMED via `CONTAINERS_STORAGE_CONF`.
+
+One turn of instrumentation beat four turns of reasoning. That is the same
+lesson as the phantom 254° gradient rotation and the `rpm -q breeze` error:
+**a mechanism inferred is not a mechanism measured.**
+
+### Why this matters more than one artifact
+
+Every "defect" chased in WP-05 was an artifact of testing a hand-mutated,
+long-lived VM instead of a built image:
+
+| Symptom | Actual cause |
+|---|---|
+| Dolphin white under a dark scheme | harness launched it with 4 env vars, no `XDG_CURRENT_DESKTOP` |
+| Wallpaper ΔRGB 83 | comparing against a JPEG of a *newer* mockup |
+| Icon theme killed every Breeze icon | `index.theme` landed 0 bytes via hand-install |
+| greenboot never confirmed a boot | a mask **this session** applied persistently |
+| Health check enabled but not running | the same mask had removed its `WantedBy` symlink |
+| Counter 3→2 with `boot_success=0` | the test read grubenv before greenboot finished |
+
+Six chases, zero real defects. Nothing is "verified" until it has been seen in
+a CI-built image.
+
+## Regression this branch shipped, and the drill that caught it
+
+For two commits, `10-meridian-desktop.sh` asserted the greeter and **stopped
+looking at `graphical.target` at all**. The rollback drill's sabotage fails a
+unit `RequiredBy=graphical.target` while plasmalogin keeps serving a greeter,
+so the check passed on a sabotaged boot and greenboot marked it good:
+
+```text
+healthcheck unit:   enabled
+healthcheck result: active
+greenboot journal:  Set grubenv: boot_success...
+```
+
+A machine that bricks itself was traded for a machine that silently keeps a
+broken update. Fixed by separating the two questions: **waiting** for a target
+to activate is a race against slow hardware (that stays gone), while asking
+whether it **failed** is a fact available immediately (that comes back).
+
+No unit test could have caught this. Only the sabotage could, and only against
+a real image.

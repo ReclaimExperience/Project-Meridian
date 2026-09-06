@@ -35,12 +35,80 @@ if not __debug__:
         "  green result for a system it never checked."
     )
 
-SUITES = ("smoke", "security", "privacy", "screens", "stories", "perf", "rollback")
+SUITES = (
+    "smoke",
+    "security",
+    "privacy",
+    "screens",
+    "stories",
+    "perf",
+    "rollback",
+    # The rollback drill's mirror: rollback proves recovery WHEN a
+    # fallback deployment exists; this proves the machine still boots when
+    # one does not.
+    "bootfloor",
+    # Produces the number PRD 10.2's Boot->greeter column wants, which the
+    # greenboot deadline must be derived from rather than guessed.
+    "boottime",
+)
+
+
+# Suites that MUST NOT write to the golden disk. `bootfloor` deliberately
+# corrupts the boot environment, and `rollback` stages a sabotage image and
+# rolls back — both leave persistent state behind. A real machine was walked
+# into an unbootable state partly because every run shared one mutable disk, so
+# a drill's damage outlived the drill.
+DESTRUCTIVE_SUITES = ("bootfloor", "rollback")
+OVERLAY_PREFIX = "overlay-"
+
+
+def overlay_for(disk: Path, arch: str) -> Path:
+    """A copy-on-write overlay, so a destructive suite cannot poison the image.
+
+    qcow2 backing files make this a metadata-only operation: the overlay starts
+    empty and the golden disk is opened read-only underneath it.
+    """
+    import subprocess
+
+    if disk.name.startswith(OVERLAY_PREFIX):
+        raise SystemExit(
+            f"refusing to build an overlay on top of an overlay ({disk.name}). "
+            "Delete it and re-run against the real image."
+        )
+    overlay = disk.parent / f"{OVERLAY_PREFIX}{arch}.qcow2"
+    overlay.unlink(missing_ok=True)
+    subprocess.run(
+        [
+            "qemu-img",
+            "create",
+            "-f",
+            "qcow2",
+            "-b",
+            str(disk.resolve()),
+            "-F",
+            "qcow2",
+            str(overlay),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    print(f"harness: writing to overlay {overlay.name}; {disk.name} stays clean")
+    return overlay
 
 
 def find_disk(arch: str) -> Path:
     build = ROOT / "build"
-    candidates = sorted(build.rglob("*.qcow2")) if build.is_dir() else []
+    # Overlays are OUTPUT, not input. Without this the second run of a
+    # destructive suite finds the previous run's overlay, calls it the disk,
+    # and asks qemu-img to back a file with itself:
+    #   Error: Trying to create an image with the same filename as the backing file
+    candidates = (
+        sorted(
+            p for p in build.rglob("*.qcow2") if not p.name.startswith(OVERLAY_PREFIX)
+        )
+        if build.is_dir()
+        else []
+    )
     # Prefer a disk whose path names this arch. `arch` was previously used only
     # in the error string, so on a machine holding both images the harness
     # booted whichever sorted first and then labelled its evidence and its
@@ -224,6 +292,8 @@ def main() -> int:
 
     # The privacy suite audits traffic, so it needs the capture enabled at boot
     # — it cannot be turned on once the VM is already running.
+    if args.suite in DESTRUCTIVE_SUITES:
+        disk = overlay_for(disk, args.arch)
     vm = VM(disk=disk, arch=args.arch, capture=args.suite == "privacy")
     failure: BaseException | None = None
     try:

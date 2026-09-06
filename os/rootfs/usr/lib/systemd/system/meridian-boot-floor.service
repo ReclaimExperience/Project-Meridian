@@ -1,0 +1,20 @@
+[Unit]
+Description=Keep the boot environment out of unbootable states
+# Before greenboot arms anything, and before the update service stages
+# anything: both can leave a counter behind.
+Before=greenboot-healthcheck.service meridian-os-update.service
+After=local-fs.target
+ConditionPathExists=/boot/grub2/grubenv
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/meridian-boot-floor
+# A failure here must never itself stop the machine booting: this unit exists
+# to make booting more reliable, so it is not permitted to become a new reason
+# a boot fails.
+SuccessExitStatus=0 1
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target

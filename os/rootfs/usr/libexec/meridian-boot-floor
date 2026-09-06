@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Keep the machine out of states from which it cannot boot.
+#
+# Fedora's ostree grub.cfg contains this, and it is where the brick comes from:
+#
+#     if [ -n "${boot_counter}" -a "${boot_success}" = "0" ]; then
+#       if [ "${boot_counter}" = "0" -o "${boot_counter}" = "-1" ]; then
+#         set default=1        # <- unconditional
+#
+# `default=1` means "the second menu entry", i.e. the rollback deployment. It is
+# set WITHOUT CHECKING THAT A SECOND ENTRY EXISTS. On a machine with one
+# deployment — every fresh install — /boot/loader/entries holds only
+# ostree-1.conf, so GRUB is pointed at nothing, boots nothing, and hands control
+# back to the firmware. A real machine was found in exactly that state:
+#
+#     boot_counter=-1   boot_success=0   saved_entry=1
+#
+# There is no way back from inside: /boot is read-only from userspace, so
+# grub2-editenv fails, and INV-0 means there is no terminal to run it from.
+#
+# We cannot patch the grub.cfg that ostree writes. What we CAN do is make the
+# state unreachable: never leave a boot counter armed when there is nothing to
+# roll back to, and repair an out-of-range entry pointer while the machine is
+# still up. That is prevention and self-heal; a machine ALREADY bricked needs
+# external media, which is recorded in docs/design/theming.md's sibling note
+# and in STATUS.md rather than pretended away.
+set -euo pipefail
+
+GRUBENV="${MERIDIAN_GRUBENV:-/boot/grub2/grubenv}"
+ENTRIES="${MERIDIAN_BLS_ENTRIES:-/boot/loader/entries}"
+
+log() { echo "boot-floor: $*"; }
+
+[[ -f "$GRUBENV" ]] || { log "no grubenv at $GRUBENV — nothing to do"; exit 0; }
+
+entry_count=$(find "$ENTRIES" -maxdepth 1 -name '*.conf' 2>/dev/null | wc -l | tr -d ' ')
+log "${entry_count} boot entry/entries"
+
+env_get() { grub2-editenv "$GRUBENV" list 2>/dev/null | sed -n "s/^$1=//p" | head -1; }
+
+counter=$(env_get boot_counter)
+saved=$(env_get saved_entry)
+
+# The two decisions, made ONCE. They were duplicated — the same condition in
+# the detection block and again in the write block — which meant a mutation
+# test that broke one copy still passed, because the other copy caught it. A
+# guard you cannot break in one place is a guard you cannot test.
+disarm=0
+clamp=0
+if [[ -n "$counter" && "$entry_count" -lt 2 ]]; then
+    log "boot_counter=${counter} but only ${entry_count} entry — will disarm"
+    disarm=1
+fi
+if [[ -n "$saved" && "$saved" =~ ^[0-9]+$ && "$saved" -ge "$entry_count" ]]; then
+    log "saved_entry=${saved} is past the last entry — will clamp to 0"
+    clamp=1
+fi
+
+if [[ "$disarm" -eq 0 && "$clamp" -eq 0 ]]; then
+    log "boot environment is sane"
+    exit 0
+fi
+
+# /boot is read-only by ostree policy. Flip it for the repair and put it back,
+# so the window where it is writable is as small as the work requires.
+remounted=0
+if ! touch "$GRUBENV" 2>/dev/null; then
+    mount -o remount,rw /boot && remounted=1
+fi
+[[ "$disarm" -eq 1 ]] && { grub2-editenv "$GRUBENV" unset boot_counter || true; }
+[[ "$clamp" -eq 1 ]] && { grub2-editenv "$GRUBENV" set saved_entry=0 default=0 || true; }
+sync
+[[ "$remounted" -eq 1 ]] && mount -o remount,ro /boot || true
+log "repaired: $(grub2-editenv "$GRUBENV" list 2>/dev/null | tr '\n' ' ')"

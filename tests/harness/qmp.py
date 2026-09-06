@@ -172,7 +172,7 @@ class QMP:
             events=[{"type": "btn", "data": {"down": False, "button": button}}],
         )
 
-    def wake_display(self) -> None:
+    def wake_display(self, click: bool = True) -> None:
         """Nudge the pointer so a greeter or lock screen reveals its form.
 
         Not cosmetic. SDDM's Breeze theme opens on a clock overlay and only
@@ -183,7 +183,14 @@ class QMP:
         for x, y in ((10000, 10000), (20000, 22000), (16384, 16384)):
             self.move_pointer(x, y)
             time.sleep(0.4)
-        self.click()
+        # `click=False` when the subject is a transient popup. The click here
+        # dismissed every context menu this harness ever tried to photograph:
+        # the menu opened, the wake clicked it away, and the frame captured the
+        # window behind it while the suite reported "captured menu". Two guards
+        # that were each correct alone, composed so that one erased the other's
+        # subject.
+        if click:
+            self.click()
         time.sleep(1.0)
 
 
