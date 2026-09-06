@@ -145,6 +145,12 @@ def run(vm: VM, credentials: dict) -> None:
         )
     print("rollback: sabotage staged; rebooting into it")
 
+    # Everything after this point in the serial transcript belongs to the
+    # sabotage boot and whatever followed it. Remembered so the drill can prove
+    # it SAW the machine boot the sabotage, rather than inferring it from the
+    # machine being back where it started.
+    transcript_mark = len(vm.serial_text())
+
     console.send_line("sudo -n systemctl reboot")
 
     # The machine now boots the sabotage, fails its health check, and greenboot
@@ -181,6 +187,45 @@ def run(vm: VM, credentials: dict) -> None:
         )
 
     print(f"rollback: back on the original deployment {original}")
+
+    # Prove the sabotage was actually BOOTED.
+    #
+    # The polls cannot show this any more. The health check now fails in about
+    # 0.16s, so the machine boots the sabotage, fails, rolls back and reboots
+    # inside the first 30-second poll interval — the first poll already sees the
+    # original deployment. A drill whose only evidence is "the machine is where
+    # it started" would pass identically if the sabotage had never booted at
+    # all, which is a green light for a rollback mechanism that does nothing.
+    #
+    # The serial transcript spans every boot in one stream, so it holds the
+    # proof: the sabotaged boot names the failed unit, and our own health check
+    # names it again when it fast-fails.
+    since_reboot = vm.serial_text()[transcript_mark:]
+    sabotage_seen = "meridian-drill-sabotage" in since_reboot
+    # NOT evidence, and reported only as a curiosity: greenboot captures a
+    # check script's stdout into the JOURNAL, not onto the console, so our
+    # health check's own words can never appear in this transcript. A `False`
+    # here says nothing about whether the check ran. Confirming that needs
+    # `journalctl -u greenboot-healthcheck`, which the boottime suite dumps.
+    check_on_console = "depends on failed unit" in since_reboot
+    boots = since_reboot.count("Linux version")
+    if not sabotage_seen:
+        raise AssertionError(
+            "the machine returned to the original deployment, but nothing in "
+            "the console transcript shows it ever BOOTED the sabotage.\n"
+            f"  kernel boots seen since the reboot: {boots}\n"
+            "  Expected either the sabotage unit named by systemd, or the "
+            "health check naming it as a failed dependency.\n"
+            "  Without one of those this drill would pass even if the sabotage "
+            "had never been booted — proving only that a machine which never "
+            "left home is still at home."
+        )
+    print(
+        f"rollback: sabotage boot observed in the transcript "
+        f"(sabotage unit named by systemd: {sabotage_seen}, "
+        f"kernel boots since reboot: {boots}; our check's own output is not "
+        f"expected here — greenboot journals it: {check_on_console})"
+    )
 
     _status, marker = console.run(
         "cat /var/lib/meridian/rollback-happened 2>/dev/null || echo ABSENT", timeout=90

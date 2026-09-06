@@ -146,6 +146,10 @@ test-lint:
     @echo
     @python3 tests/lint/policy_json.py
     @echo
+    @echo
+    @python3 tests/lint/test_boot_floor.py
+    @python3 tests/lint/test_health_check.py
+    @echo
     @python3 tests/harness/test_pcap.py
     @echo
     @python3 tests/harness/test_suite_guards.py
@@ -157,6 +161,9 @@ test-lint:
     @python3 tests/harness/test_screen_presence.py
     @echo
     @python3 tests/harness/test_console_prompts.py
+    @python3 tests/harness/test_console_firmware.py
+    @python3 tests/harness/test_channel_lost.py
+    @python3 tests/harness/test_capture_subjects.py
 
 # ------------------------------------------------------------------ build ---
 
@@ -352,6 +359,13 @@ vm-image arch="x86_64":
     printf '{"user": "mtest", "password": "%s"}\n' "${devpass}" > build/dev-credentials.json
     chmod 600 build/dev-credentials.json
 
+    # The store is mounted at /var/lib/containers/storage because that is where
+    # bootc-image-builder looks; mounting it anywhere else fails with
+    # "could not access container storage, did you forget -v ...". The store's
+    # own database must ALSO record that path, or podman refuses to open it —
+    # ci/prepare-runner.sh keeps that true by bind-mounting the big volume
+    # under the canonical path rather than reconfiguring graphroot.
+
     echo "building qcow2 from ${tag}"
     echo "  dev login: mtest / ${devpass}   (this disk image only; never published)"
     podman run --rm --privileged \
@@ -471,6 +485,21 @@ vm-test suite="smoke" arch="":
     [ "$arch" = "arm64" ] && arch=aarch64
     python3 tests/harness/run.py "{{ suite }}" --arch "$arch"
 
+# Capture the theme compare sheet for owner review (WP-05).
+# Captures every surface in both themes, then composes ours beside the mockup
+# crops. The sheet states the resolved font family: a silent fallback is the
+# thing this review exists to catch, so it must not be left to inference.
+theme-montage arch="" mockups="docs/design/mockup/crops":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    arch="{{ arch }}"
+    [ -n "$arch" ] || arch="$(uname -m)"
+    [ "$arch" = "arm64" ] && arch=aarch64
+    python3 tests/harness/run.py theme --arch "$arch"
+    python3 tests/harness/montage.py build/evidence "{{ mockups }}" \
+        build/evidence/theme-compare-sheet.png
+    echo "compare sheet: build/evidence/theme-compare-sheet.png"
+
 # Re-baseline screenshots, deliberately (PRD 7.4, rule R-F).
 # screen: a screen name, or "all". Commit the result on its own, with a
 # STATUS.md note — a baseline that changes quietly is a regression that passed.
@@ -502,8 +531,10 @@ perf budget="" arch="":
 # ----------------------------------------------------------------- assets ---
 
 # Regenerate rasters/wallpapers from SVG sources and template branding strings
+# Regenerate everything derived from docs/design/tokens.json (WP-05).
+# this is how you fix that — never by editing the generated file.
 assets:
-    @just _todo WP-05 "assets"
+    @python3 shell/theme/generate-theme.py
 
 # -------------------------------------------------------------------- iso ---
 

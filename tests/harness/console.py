@@ -37,6 +37,20 @@ PROMPT = re.compile(r"[\$#]\s*$")
 LOGIN_PROMPT = re.compile(r"login:\s*" + _KERNEL_NOISE, re.IGNORECASE)
 PASSWORD_PROMPT = re.compile(r"password:\s*" + _KERNEL_NOISE, re.IGNORECASE)
 
+# Before Linux owns the serial console, UEFI and GRUB are reading it. A
+# keystroke sent then is a menu selection, not a nudge: it can stop GRUB's
+# countdown or drop the machine into the firmware's setup application, where
+# every later keystroke is swallowed by a menu that never yields a getty.
+# These two patterns say the console is in firmware hands.
+FIRMWARE_TRAP = re.compile(
+    r'starting Boot0000 "UiApp"'
+    r"|change the language for the current system"
+    r"|Boot Maintenance Manager",
+    re.IGNORECASE,
+)
+# ...and these say userspace has started talking, so nudging is safe.
+USERSPACE = re.compile(r"systemd\[1\]|Reached target|Welcome to |login:", re.IGNORECASE)
+
 # Escape sequences the shell and systemd emit. OSC must be listed first and
 # must accept BOTH terminators: modern shells emit OSC 3008 session markers
 # ending in ST (ESC backslash), not BEL, and a BEL-only pattern leaves the whole
@@ -51,6 +65,22 @@ ANSI = re.compile(
 
 class ConsoleError(RuntimeError):
     pass
+
+
+class ChannelLost(ConsoleError):
+    """The command never executed — the console is not at a shell.
+
+    Deliberately a different exception from a timeout, because they mean
+    opposite things and were indistinguishable for most of WP-05. When a suite
+    reboots the machine (or greenboot does), the login session dies and every
+    subsequent `run` is TYPED INTO `login:`. No sentinel can ever come back, so
+    the harness waited out its timeout and reported "command timed out" — which
+    reads as a slow machine and was repeatedly written up as a product finding.
+    The serial logs show the commands sitting at the login prompt, verbatim,
+    never executed.
+
+    A result is only evidence if the command demonstrably ran.
+    """
 
 
 class Console:
@@ -156,6 +186,32 @@ class Console:
 
     # ----------------------------------------------------------------- login --
 
+    def _refuse_firmware(self) -> None:
+        """Raise if the console is owned by UEFI or the bootloader.
+
+        Checked before every keystroke of the login sequence. Typing on into a
+        firmware menu is what turns a failed boot into a ten-minute silence
+        that reads like a hung getty.
+        """
+        if FIRMWARE_TRAP.search(self._clean()):
+            raise ConsoleError(
+                "the VM is in the UEFI setup application, not booting Linux. "
+                "GRUB handed control back to the firmware, which fell through "
+                "to Boot0000 (UiApp). Nothing typed here reaches a getty."
+            )
+
+    def _await_userspace(self, deadline: float, timeout: float) -> None:
+        """Wait, sending nothing, until Linux is talking on the console."""
+        while time.monotonic() < deadline:
+            self._refuse_firmware()
+            if USERSPACE.search(self._clean()):
+                return
+            time.sleep(1.0)
+        raise ConsoleError(
+            f"no sign of userspace on the console within {timeout:.0f}s — "
+            "the VM never got past the firmware or the bootloader."
+        )
+
     def login(self, user: str, password: str, timeout: float = 300.0) -> None:
         """Log in on the console, tolerating a getty that is not up yet.
 
@@ -164,7 +220,9 @@ class Console:
         scrolled past or may not have been emitted at all.
         """
         deadline = time.monotonic() + timeout
+        self._await_userspace(deadline, timeout)
         while time.monotonic() < deadline:
+            self._refuse_firmware()
             self.send_line()
             try:
                 self.wait_for(LOGIN_PROMPT, timeout=10)
@@ -179,6 +237,10 @@ class Console:
         self.send_line(user)
         self.wait_for(PASSWORD_PROMPT, timeout=30)
         self.send_line(password)
+        # Remembered so `run` can re-establish the session after a reboot. A
+        # channel that cannot recover from the machine restarting is not usable
+        # for testing a machine whose whole subject is restarting.
+        self._credentials = (user, password)
         # A wrong password re-prompts rather than erroring, so watch for both.
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
@@ -210,18 +272,39 @@ class Console:
 
         deadline = _time.monotonic() + timeout
         last = ""
+        slow = 0
         while _time.monotonic() < deadline:
-            _status, last = self.run(command, timeout=min(60.0, timeout))
+            # A command that does not answer in time is "not yet", not "give
+            # up". This used to let a single slow reply raise straight out of
+            # the wait: a `systemctl is-active` call took >60s while the
+            # machine was busy bringing up a desktop under llvmpipe, and a
+            # 420-second wait died at 60 with a message about a command
+            # timeout. It read as the machine having rebooted, and was
+            # reported as one. A polling primitive that cannot tolerate a slow
+            # poll is not a polling primitive.
+            remaining = deadline - _time.monotonic()
+            try:
+                _status, last = self.run(
+                    command, timeout=max(15.0, min(90.0, remaining))
+                )
+            except ConsoleError as exc:
+                slow += 1
+                last = f"(no reply within the per-poll budget: {exc})"
+                _time.sleep(poll)
+                continue
             if predicate(last):
                 return last
             _time.sleep(poll)
         raise ConsoleError(
             f"timed out after {timeout:.0f}s waiting for "
             f"{description or predicate!r} via {command!r}.\n"
-            f"  last output: {last.strip()[:400]!r}"
+            f"  last output: {last.strip()[:400]!r}\n"
+            f"  polls that got no reply in time: {slow}"
         )
 
-    def run(self, command: str, timeout: float = 60.0) -> tuple[int, str]:
+    def run(
+        self, command: str, timeout: float = 60.0, _retry: bool = False
+    ) -> tuple[int, str]:
         """Run a command, returning (exit_status, output).
 
         Output is bracketed by a PAIR of sentinels, and the marker is assembled
@@ -266,8 +349,47 @@ class Console:
                 return int(match.group(1)), body.strip()
             time.sleep(0.3)
 
-        tail = "\n  ".join(self._clean().strip().split("\n")[-25:])
+        clean = self._clean()
+        tail = "\n  ".join(clean.strip().split("\n")[-25:])
+
+        # Did the command execute at all? If the console is sitting at a login
+        # prompt, it did not: it was typed as a username. Say so, and try once
+        # to get the session back, because the alternative is reporting a
+        # phantom about a machine that is fine.
+        # What a lost session actually looks like: the command was typed as a
+        # USERNAME, so login answers "Password:", eats the next line, says
+        # "Login incorrect" and prompts again. Any of those means no shell.
+        lost = bool(
+            LOGIN_PROMPT.search(clean)
+            or PASSWORD_PROMPT.search(clean)
+            or re.search(r"Login incorrect", clean, re.IGNORECASE)
+        )
+        if lost and not _retry:
+            credentials = getattr(self, "_credentials", None)
+            if credentials:
+                print(
+                    "console: the session is gone (login prompt on screen) — "
+                    "the machine rebooted under us. Logging back in and "
+                    "retrying once."
+                )
+                self.login(*credentials, timeout=300)
+                return self.run(command, timeout=timeout, _retry=True)
+            raise ChannelLost(
+                f"{command!r} was typed at a login prompt, not a shell, so it "
+                "never ran. No credentials were remembered, so the session "
+                "cannot be re-established.\n"
+                f"Last of the console:\n  {tail}"
+            )
+        if lost:
+            raise ChannelLost(
+                f"{command!r} still could not run after re-login: the console "
+                "is at a login prompt.\n"
+                f"Last of the console:\n  {tail}"
+            )
+
         raise ConsoleError(
             f"command timed out after {timeout:.0f}s: {command!r}\n"
+            f"  (a shell was present, so this is genuinely slow, not a lost "
+            f"session)\n"
             f"Last of the console:\n  {tail}"
         )
