@@ -44,6 +44,21 @@ def run(vm: VM, credentials: dict) -> None:
     # A diagnostic that only runs when everything went well is not a diagnostic.
     for label, cmd in (
         ("default target", "systemctl get-default 2>&1"),
+        # Does OUR health check actually run, and what does it decide? Its
+        # output never reaches the serial console — greenboot captures it into
+        # the journal — so a 7000-line transcript with none of our lines in it
+        # proves nothing either way. This is the channel that carries it.
+        (
+            "greenboot journal",
+            "journalctl -b -u greenboot-healthcheck.service --no-pager 2>&1 | tail -20",
+        ),
+        (
+            "health check result",
+            (
+                "systemctl show -p Result -p ActiveState -p ExecMainStatus "
+                "--value greenboot-healthcheck.service 2>&1 | tr '\\n' ' '"
+            ),
+        ),
         ("graphical now", "systemctl is-active graphical.target 2>&1"),
         (
             "display manager",
