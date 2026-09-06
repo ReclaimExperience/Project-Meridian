@@ -37,6 +37,34 @@ def run(vm: VM, credentials: dict) -> None:
     console = vm.console
     console.login(credentials["user"], credentials["password"], timeout=600)
 
+    # Collect the state FIRST, before any wait. Every previous version asked
+    # its questions after a 420s wait, by which time greenboot had rebooted the
+    # machine, the shell session was gone, and every command was being typed
+    # into a login prompt — the serial log shows them sitting there unexecuted.
+    # A diagnostic that only runs when everything went well is not a diagnostic.
+    for label, cmd in (
+        ("default target", "systemctl get-default 2>&1"),
+        ("graphical now", "systemctl is-active graphical.target 2>&1"),
+        (
+            "display manager",
+            (
+                "systemctl is-enabled display-manager.service 2>&1; "
+                "systemctl is-active display-manager.service 2>&1"
+            ),
+        ),
+        ("jobs queued", "systemctl list-jobs --no-pager 2>&1 | head -10"),
+        ("failed units", "systemctl --failed --no-legend --no-pager 2>&1 | head -8"),
+        (
+            "graphical wants",
+            (
+                "systemctl show -p Wants --value graphical.target 2>&1 "
+                "| tr ' ' '\\n' | head -8"
+            ),
+        ),
+    ):
+        _s, out = console.run(cmd, timeout=120)
+        print(f"boottime[early]: {label}\n{out.strip()[:400]}\n", flush=True)
+
     _s, mask = console.run(
         "systemctl is-enabled NetworkManager-wait-online.service 2>&1", timeout=90
     )
