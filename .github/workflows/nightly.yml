@@ -148,9 +148,21 @@ jobs:
         run: bash ci/build.sh aarch64
       - name: Build the disk image
         run: |
-          sudo env "PATH=${PATH}" "HOME=/root" \
-            "CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf" \
-            just vm-image aarch64
+          # ci/build.sh builds ROOTLESS, and bootc-image-builder only reads
+          # ROOT's store. The x86_64 path moves the image across inside
+          # ci/vm-test.sh; this job was written without that step, so every
+          # run failed with "testing-aarch64 not found — run 'just build
+          # aarch64' first" — true of root's store, false of the one the image
+          # was actually built into.
+          ROOT=(sudo env "PATH=${PATH}" "HOME=/root"
+                "CONTAINERS_STORAGE_CONF=/etc/containers/storage-root.conf")
+          IMAGE="$(python3 -c "import json;d=json.load(open('os/rootfs/usr/share/meridian/branding.json'));print(d['registry']['namespace']+'/'+d['registry']['image'])")"
+          REF="${IMAGE}:testing-aarch64"
+          if ! "${ROOT[@]}" podman image exists "${REF}"; then
+            echo "moving ${REF} from the rootless store into root's"
+            podman save "${REF}" | "${ROOT[@]}" podman load
+          fi
+          "${ROOT[@]}" just vm-image aarch64
           sudo chown -R "$(id -u):$(id -g)" build
       - name: Upload the bootable disk image
         uses: actions/upload-artifact@v4
