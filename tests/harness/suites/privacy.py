@@ -80,6 +80,34 @@ def permitted(name: str, allowed: dict[str, str]) -> str | None:
     return None
 
 
+def asked_for(address: str, resolved: dict[str, str]) -> str | None:
+    """The name the guest ASKED for that produced `address`, or None.
+
+    `pcap.read` maps each answered IP to its record's owner. After a CNAME that
+    owner is the CNAME's TARGET, not the name in the question, so a lookup of
+    `dl.flathub.org` answered as
+
+        dl.flathub.org.  CNAME  dualstack.n.sni.global.fastly.net.
+        dualstack.n.sni.global.fastly.net.  A  151.101.201.91
+
+    attributes 151.101.201.91 to `dualstack.n.sni.global.fastly.net`. The audit
+    then judged the CDN's hostname against an allowlist written in terms of the
+    names the guest asks for, and reported a permitted Flatpak update check as
+    an ADR-011 violation — on every night the idle window happened to catch one.
+
+    The CNAME links are already recorded (target -> owner); nothing walked them.
+    This walks back to the head of the chain, which is the question. It judges
+    that name rather than widening the allowlist: adding the CDN would have
+    permitted everything Fastly hosts.
+    """
+    name = resolved.get(address)
+    seen: set[str] = set()
+    while name is not None and name in resolved and name not in seen:
+        seen.add(name)
+        name = resolved[name]
+    return name
+
+
 def run(vm: VM, credentials: dict) -> None:
     if not vm.capture:
         raise AssertionError(
@@ -163,7 +191,7 @@ def run(vm: VM, credentials: dict) -> None:
     for flow in sorted(flows, key=str):
         if is_local(flow.destination):
             continue
-        name = resolved.get(flow.destination)
+        name = asked_for(flow.destination, resolved)
         if name is None:
             violations.append(
                 f"contacted {flow} with no DNS name behind it — a hard-coded "

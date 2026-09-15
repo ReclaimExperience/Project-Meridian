@@ -163,6 +163,7 @@ test-lint:
     @python3 tests/harness/test_console_prompts.py
     @python3 tests/harness/test_console_firmware.py
     @python3 tests/harness/test_channel_lost.py
+    @python3 tests/harness/test_privacy_cname.py
     @python3 tests/harness/test_capture_subjects.py
 
 # ------------------------------------------------------------------ build ---
