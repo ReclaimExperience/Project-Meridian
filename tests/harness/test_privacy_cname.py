@@ -68,6 +68,9 @@ def main() -> int:
         )
     )
     head = asked_for("151.101.201.91", resolved)
+    if "dl.flathub.org" not in names:
+        print("FAIL: the question name was not recorded at all")
+        failures += 1
     if head != "dl.flathub.org":
         print(f"FAIL: CDN-hosted permitted lookup attributed to {head!r}")
         failures += 1
@@ -77,7 +80,7 @@ def main() -> int:
 
     # 2. Laundering: an unpermitted name that CNAMEs to a permitted zone must
     #    still be judged by the name the guest asked for.
-    names, resolved = pcap._dns_message(
+    _names, resolved = pcap._dns_message(
         response("telemetry.example.com", ["mirror.flathub.org"], "203.0.113.9")
     )
     head = asked_for("203.0.113.9", resolved)
@@ -91,13 +94,13 @@ def main() -> int:
         failures += 1
 
     # 3. No CNAME at all: unchanged behaviour.
-    names, resolved = pcap._dns_message(response("fwupd.org", [], "198.51.100.4"))
+    _names, resolved = pcap._dns_message(response("fwupd.org", [], "198.51.100.4"))
     if asked_for("198.51.100.4", resolved) != "fwupd.org":
         print("FAIL: a plain A record no longer attributes to its own name")
         failures += 1
 
     # 4. Multi-hop chains walk all the way back.
-    names, resolved = pcap._dns_message(
+    _names, resolved = pcap._dns_message(
         response("dl.flathub.org", ["a.cdn.example", "b.edge.example"], "192.0.2.7")
     )
     if asked_for("192.0.2.7", resolved) != "dl.flathub.org":
