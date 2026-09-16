@@ -8,7 +8,7 @@
 # is still needed, so that knowledge moved here rather than being rediscovered.
 set -euo pipefail
 
-ARCH="${1:?usage: ci/vm-test.sh <arch> [--repeat N] <suite> [suite...]}"
+ARCH="${1:?usage: ci/vm-test.sh <arch> [--repeat N] [suite...]   (no suite = build only)}"
 shift
 
 # The flaky-rate gate runs the same suite ten times. Repeat only the SUITE, not
@@ -104,7 +104,10 @@ echo "::endgroup::"
 status=0
 failures=0
 for pass in $(seq 1 "$REPEAT"); do
-    for suite in "${SUITES[@]}"; do
+    # Zero suites is a supported mode: build the disk image and stop. The
+    # guard matters for the same bash 3.2 reason as SUDO above — an empty
+    # array expansion is an unbound-variable error there.
+    for suite in ${SUITES[@]+"${SUITES[@]}"}; do
         label="${suite}"
         [[ "$REPEAT" -gt 1 ]] && label="${suite} (pass ${pass}/${REPEAT})"
         echo "::group::vm-test ${label}"
